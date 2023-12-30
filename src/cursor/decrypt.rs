@@ -36,4 +36,11 @@ impl DecryptCursor {
             }
         }
     }
+
+    pub fn remaining_nonce_size(&self) -> usize {
+        match self.state.as_ref().unwrap() {
+            WriteCursorState::Nonce(c) => c.remaining_nonce_size(),
+            WriteCursorState::UserData(_) => 0,
+        }
+    }
 }
