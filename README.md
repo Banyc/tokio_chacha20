@@ -2,6 +2,8 @@
 
 ## How to use
 
+Async:
+
 ```rust
 let config = create_random_config();
 
@@ -15,4 +17,21 @@ let data = b"Hello, world!";
 let mut buf = [0u8; 1024];
 client.write_all(data).await.unwrap();
 server.read_exact(&mut buf[..data.len()]).await.unwrap();
+```
+
+Sync:
+
+
+```rust
+let config = create_random_config();
+
+let msg = b"Hello world!";
+let mut en = EncryptCursor::new(*config.key());
+let mut de = DecryptCursor::new(*config.key());
+let mut buf = [0; 1024];
+
+let (_, n) = en.encrypt(msg, &mut buf).unwrap();
+let i = de.decrypt(&mut buf[..n]).unwrap();
+let i = i.unwrap();
+assert_eq!(&buf[i..n], &msg[..]);        
 ```
