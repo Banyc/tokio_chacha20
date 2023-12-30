@@ -22,15 +22,15 @@ impl NonceReadCursor {
         &self.nonce.get_ref()[self.nonce.position() as usize..]
     }
 
-    pub fn consume_nonce(mut self, amt: usize) -> ReadCursor {
+    pub fn consume_nonce(mut self, amt: usize) -> ReadCursorState {
         self.nonce.consume(amt);
         if self.nonce.position() as usize != self.nonce.get_ref().len() {
-            return ReadCursor::Nonce(self);
+            return ReadCursorState::Nonce(self);
         }
 
         let cipher = StreamCipher::new(self.key, self.nonce.into_inner());
         let cursor = UserDataCursor::new(cipher);
-        ReadCursor::UserData(cursor)
+        ReadCursorState::UserData(cursor)
     }
 
     pub async fn encode_nonce_to<W: AsyncWrite + Unpin>(
@@ -44,7 +44,7 @@ impl NonceReadCursor {
 }
 
 #[derive(Debug, Clone)]
-pub enum ReadCursor {
+pub enum ReadCursorState {
     Nonce(NonceReadCursor),
     UserData(UserDataCursor),
 }

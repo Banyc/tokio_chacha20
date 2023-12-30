@@ -5,18 +5,18 @@ use std::{
 
 use tokio::io::AsyncWrite;
 
-use crate::cursor::{NonceReadCursor, ReadCursor};
+use crate::cursor::{NonceReadCursor, ReadCursorState};
 
 #[derive(Debug)]
 pub struct WriteHalf<W> {
-    cursor: Option<ReadCursor>,
+    cursor: Option<ReadCursorState>,
     w: W,
     buf: Option<Vec<u8>>,
 }
 impl<W> WriteHalf<W> {
     pub fn new(key: [u8; 32], w: W) -> Self {
         let cursor = NonceReadCursor::new(key);
-        let cursor = Some(ReadCursor::Nonce(cursor));
+        let cursor = Some(ReadCursorState::Nonce(cursor));
         let buf = Some(vec![]);
         Self { cursor, w, buf }
     }
@@ -30,7 +30,7 @@ impl<W: AsyncWrite + Unpin> AsyncWrite for WriteHalf<W> {
         // Loop for state transitions from `Nonce` to `UserData`
         loop {
             match self.cursor.take().unwrap() {
-                ReadCursor::Nonce(c) => {
+                ReadCursorState::Nonce(c) => {
                     // Write nonce to `w`
                     let ready = Pin::new(&mut self.w).poll_write(cx, c.remaining_nonce());
 
@@ -39,13 +39,13 @@ impl<W: AsyncWrite + Unpin> AsyncWrite for WriteHalf<W> {
                     self.cursor = Some(if let Poll::Ready(Ok(amt)) = ready {
                         c.consume_nonce(amt)
                     } else {
-                        ReadCursor::Nonce(c)
+                        ReadCursorState::Nonce(c)
                     });
 
                     // Raise exception on either `Err` or `Pending`
                     let _ = ready!(ready)?;
                 }
-                ReadCursor::UserData(mut c) => {
+                ReadCursorState::UserData(mut c) => {
                     // Reuse the inner buffer
                     let mut inner_buf = self.buf.take().unwrap();
 
@@ -56,7 +56,7 @@ impl<W: AsyncWrite + Unpin> AsyncWrite for WriteHalf<W> {
                     }
 
                     // Return the cursor
-                    self.cursor = Some(ReadCursor::UserData(c));
+                    self.cursor = Some(ReadCursorState::UserData(c));
 
                     // Try to write `w` with the inner buffer
                     let ready = Pin::new(&mut self.w).poll_write(cx, &inner_buf);

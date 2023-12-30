@@ -3,17 +3,17 @@ use std::{io, pin::Pin, task::ready};
 use arrayvec::ArrayVec;
 use tokio::io::{AsyncRead, ReadBuf};
 
-use crate::cursor::{NonceWriteCursor, WriteCursor};
+use crate::cursor::{NonceWriteCursor, WriteCursorState};
 
 #[derive(Debug)]
 pub struct ReadHalf<R> {
-    cursor: Option<WriteCursor>,
+    cursor: Option<WriteCursorState>,
     r: R,
 }
 impl<R> ReadHalf<R> {
     pub fn new(key: [u8; 32], r: R) -> Self {
         let cursor = NonceWriteCursor::new(key);
-        let cursor = Some(WriteCursor::Nonce(cursor));
+        let cursor = Some(WriteCursorState::Nonce(cursor));
         Self { cursor, r }
     }
 }
@@ -26,7 +26,7 @@ impl<R: AsyncRead + Unpin> AsyncRead for ReadHalf<R> {
         // Loop for state transitions from `Nonce` to `UserData`
         loop {
             match self.cursor.take().unwrap() {
-                WriteCursor::Nonce(c) => {
+                WriteCursorState::Nonce(c) => {
                     // let mut buf = vec![0; self.remaining_nonce_size()];
                     let mut buf = ArrayVec::<u8, 12>::from_iter(
                         std::iter::repeat(0).take(c.remaining_nonce_size()),
@@ -41,14 +41,14 @@ impl<R: AsyncRead + Unpin> AsyncRead for ReadHalf<R> {
 
                     ready!(ready)?;
                 }
-                WriteCursor::UserData(mut c) => {
+                WriteCursorState::UserData(mut c) => {
                     // Read data from the `r`
                     let ready = Pin::new(&mut self.r).poll_read(cx, buf);
 
                     // Decrypt the read user data in place
                     c.xor(buf.filled_mut());
 
-                    self.cursor = Some(WriteCursor::UserData(c));
+                    self.cursor = Some(WriteCursorState::UserData(c));
                     return ready;
                 }
             }
