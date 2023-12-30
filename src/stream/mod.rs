@@ -23,11 +23,12 @@ mod tests {
 
         let data = b"Hello, world!";
         let mut buf = [0u8; 1024];
-        eprintln!("Writing data");
-        client.write_all(data).await.unwrap();
-        eprintln!("Reading data");
-        server.read_exact(&mut buf[..data.len()]).await.unwrap();
-        assert_eq!(&buf[..data.len()], data);
+
+        for _ in 0..1024 {
+            client.write_all(data).await.unwrap();
+            server.read_exact(&mut buf[..data.len()]).await.unwrap();
+            assert_eq!(&buf[..data.len()], data);
+        }
     }
 
     #[tokio::test]
@@ -42,10 +43,11 @@ mod tests {
 
         let data = b"Hello, world!";
         let mut buf = [0u8; 1024];
-        eprintln!("Writing data");
-        client.write_all(data).await.unwrap();
-        eprintln!("Reading data");
-        server.read_exact(&mut buf[..data.len()]).await.unwrap();
-        assert_eq!(&buf[..data.len()], data);
+
+        for _ in 0..1024 {
+            client.write_all(data).await.unwrap();
+            server.read_exact(&mut buf[..data.len()]).await.unwrap();
+            assert_eq!(&buf[..data.len()], data);
+        }
     }
 }
