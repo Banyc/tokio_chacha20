@@ -13,7 +13,7 @@ impl DecryptCursor {
     }
 
     /// Return the start index of the decrypted user data
-    pub fn decrypt(&mut self, buf: &mut [u8]) -> io::Result<Option<usize>> {
+    pub fn decrypt(&mut self, buf: &mut [u8]) -> Option<usize> {
         let mut pos = 0;
 
         // Loop for state transitions from `Nonce` to `UserData`
@@ -25,13 +25,13 @@ impl DecryptCursor {
                     self.state = Some(c);
                     pos = rdr.position() as usize;
                     if pos == rdr.get_ref().len() {
-                        return Ok(None);
+                        return None;
                     }
                 }
                 WriteCursorState::UserData(mut c) => {
                     c.xor(&mut buf[pos..]);
                     self.state = Some(WriteCursorState::UserData(c));
-                    return Ok(Some(pos));
+                    return Some(pos);
                 }
             }
         }

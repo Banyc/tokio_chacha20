@@ -25,12 +25,11 @@ mod tests {
         let mut buf = [0; 1024];
 
         for _ in 0..1024 {
-            let (_, n) = en.encrypt(msg, &mut buf).unwrap();
+            let (_, n) = en.encrypt(msg, &mut buf);
             let i = de.decrypt(&mut buf[..n]).unwrap();
-            let i = i.unwrap();
             assert_eq!(&buf[i..n], &msg[..]);
 
-            let n = en.encrypt(msg, &mut []).unwrap();
+            let n = en.encrypt(msg, &mut []);
             assert_eq!(n, (0, 0));
         }
     }

@@ -1,5 +1,3 @@
-use std::io;
-
 use super::{NonceReadCursor, ReadCursorState};
 
 pub struct EncryptCursor {
@@ -13,7 +11,7 @@ impl EncryptCursor {
     }
 
     /// Return the amount of bytes read from `from` and the amount of bytes written to `to`
-    pub fn encrypt(&mut self, from: &[u8], to: &mut [u8]) -> io::Result<(usize, usize)> {
+    pub fn encrypt(&mut self, from: &[u8], to: &mut [u8]) -> (usize, usize) {
         let mut to_amt = 0;
 
         // Loop for state transitions from `Nonce` to `UserData`
@@ -25,7 +23,7 @@ impl EncryptCursor {
                     self.state = Some(c.consume_nonce(n));
                     to_amt += n;
                     if n == to.len() {
-                        return Ok((0, to_amt));
+                        return (0, to_amt);
                     }
                 }
                 ReadCursorState::UserData(mut c) => {
@@ -35,7 +33,7 @@ impl EncryptCursor {
                     to_amt += n;
                     c.xor(&mut to[..n]);
                     self.state = Some(ReadCursorState::UserData(c));
-                    return Ok((n, to_amt));
+                    return (n, to_amt);
                 }
             }
         }
