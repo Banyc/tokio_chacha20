@@ -10,7 +10,7 @@ pub type ConfigKey = Arc<[u8]>;
 pub struct ConfigBuilder(pub String);
 impl ConfigBuilder {
     pub fn build(&self) -> Result<Config, ConfigBuildError> {
-        let key = BASE64_STANDARD
+        let key = BASE64_STANDARD_NO_PAD
             .decode(&self.0)
             .map_err(|e| ConfigBuildError {
                 source: e,
