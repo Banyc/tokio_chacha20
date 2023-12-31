@@ -1,9 +1,9 @@
-#[cfg(feature = "rayon")]
-use rayon::iter::{
-    IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
-};
+use rayon::prelude::*;
 
 const CONSTANT: &[u8; 16] = b"expand 32-byte k";
+const BLOCK_SIZE: usize = 64;
+const PAR_OUTER_CHUNK_SIZE: usize = 64;
+const PAR_BLOCKS_THRESHOLD: usize = 320;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StreamCipher {
@@ -19,17 +19,15 @@ impl StreamCipher {
         }
     }
 
-    /// Very slow. Use [`StreamCipher::encrypt`] instead
-    #[cfg(feature = "rayon")]
-    pub fn par_encrypt(&mut self, buf: &mut [u8]) {
-        self.encrypt_(buf, par_xor)
-    }
-
     pub fn encrypt(&mut self, buf: &mut [u8]) {
-        self.encrypt_(buf, xor)
+        let par = match PAR_BLOCKS_THRESHOLD < buf.chunks(BLOCK_SIZE).count() {
+            true => ParOrNot::Parallel,
+            false => ParOrNot::Serial,
+        };
+        self.encrypt_(buf, par)
     }
 
-    fn encrypt_(&mut self, buf: &mut [u8], xor: fn(&mut [u8], &[u8]) -> usize) {
+    fn encrypt_(&mut self, buf: &mut [u8], par: ParOrNot) {
         let mut pos = 0;
 
         // Consume the leftover
@@ -47,32 +45,96 @@ impl StreamCipher {
         }
         assert!(self.leftover.is_none());
 
-        // Milk the block
-        while pos < buf.len() {
-            let state = self.block.block();
+        let buf = &mut buf[pos..];
 
-            let size = xor(&mut buf[pos..], state.byte_vec());
+        // Milk the blocks
+        let xor_full_block = |(i, c): (usize, &mut [u8])| {
+            let state = self.block.next_nth_block(i as u32);
+            let size = xor(c, state.byte_vec());
+            assert_eq!(size, state.byte_vec().len());
+            assert_eq!(size, c.len());
+        };
+        match par {
+            ParOrNot::Parallel => {
+                // buf.par_chunks_exact_mut(BLOCK_SIZE)
+                //     .enumerate()
+                //     .for_each(xor_full_block);
+
+                buf.par_chunks_mut(BLOCK_SIZE * PAR_OUTER_CHUNK_SIZE)
+                    .enumerate()
+                    .for_each(|(i, c)| {
+                        c.chunks_exact_mut(BLOCK_SIZE)
+                            .enumerate()
+                            .map(|(j, c)| (j + i * PAR_OUTER_CHUNK_SIZE, c))
+                            .for_each(xor_full_block);
+                    });
+            }
+            ParOrNot::Serial => {
+                buf.chunks_exact_mut(BLOCK_SIZE)
+                    .enumerate()
+                    .for_each(xor_full_block);
+            }
+        }
+
+        // Last `buf` chuck
+        let i = buf.chunks_exact(BLOCK_SIZE).count();
+        let c = buf.chunks_exact_mut(BLOCK_SIZE).into_remainder();
+        if !c.is_empty() {
+            let state = self.block.next_nth_block(i as u32);
+            let size = xor(c, state.byte_vec());
+            self.leftover = Some((state, size));
+        }
+        self.block
+            .increment_counter(buf.chunks(BLOCK_SIZE).count() as u32);
+    }
+
+    pub fn par_encrypt(&mut self, buf: &mut [u8]) {
+        let mut pos = 0;
+
+        // Consume the leftover
+        if let Some((state, next)) = self.leftover.take() {
+            let remaining = &state.byte_vec()[next..];
+
+            let size = xor(buf, remaining);
             pos += size;
 
-            if size != state.byte_vec().len() {
-                self.leftover = Some((state, size));
+            let next = next + size;
+            if next != state.byte_vec().len() {
+                self.leftover = Some((state, next));
                 return;
             }
         }
+        assert!(self.leftover.is_none());
+
+        let buf = &mut buf[pos..];
+
+        // Milk the blocks
+        const BLOCK_SIZE: usize = 64;
+        buf.par_chunks_exact_mut(BLOCK_SIZE)
+            .enumerate()
+            .for_each(|(i, c)| {
+                let state = self.block.next_nth_block(i as u32);
+                let size = xor(c, state.byte_vec());
+                assert_eq!(size, state.byte_vec().len());
+                assert_eq!(size, c.len());
+            });
+
+        // Last `buf` chuck
+        let i = buf.chunks_exact(BLOCK_SIZE).count();
+        let c = buf.chunks_exact_mut(BLOCK_SIZE).into_remainder();
+        if !c.is_empty() {
+            let state = self.block.next_nth_block(i as u32);
+            let size = xor(c, state.byte_vec());
+            self.leftover = Some((state, size));
+        }
+        self.block
+            .increment_counter(buf.chunks(BLOCK_SIZE).count() as u32);
     }
 }
 
-#[cfg(feature = "rayon")]
-fn par_xor(buf: &mut [u8], other: &[u8]) -> usize {
-    let size = buf.len().min(other.len());
-
-    let vec = other.par_iter().take(size).copied();
-    buf.par_iter_mut()
-        .take(size)
-        .zip(vec)
-        .for_each(|(b, s)| *b ^= s);
-
-    size
+enum ParOrNot {
+    Parallel,
+    Serial,
 }
 
 fn xor(buf: &mut [u8], other: &[u8]) -> usize {
@@ -125,11 +187,13 @@ impl Block {
         }
     }
 
-    pub fn state(&self) -> State {
+    pub fn next_nth_state(&self, n: u32) -> State {
+        let b = self.counter.wrapping_add(n);
+
         let c = &self.constant;
         let n = &self.nonce;
         let k = &self.key;
-        let b = [self.counter];
+        let b = [b];
         State::new([
             c[0], c[1], c[2], c[3], //
             k[0], k[1], k[2], k[3], //
@@ -138,17 +202,19 @@ impl Block {
         ])
     }
 
-    pub fn block(&mut self) -> State {
-        let mut state = self.state();
+    pub fn next_nth_block(&self, n: u32) -> State {
+        let mut state = self.next_nth_state(n);
         let mut working_state = state;
 
         inner_block(&mut working_state);
 
         state.add(working_state.vec());
 
-        self.counter = self.counter.wrapping_add(1);
-
         state
+    }
+
+    pub fn increment_counter(&mut self, n: u32) {
+        self.counter = self.counter.wrapping_add(n);
     }
 }
 
@@ -280,8 +346,8 @@ mod tests {
             0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x4a, 0x00, 0x00, 0x00, 0x00,
         ];
         let counter = 1;
-        let mut block = Block::new(key, nonce, counter);
-        let mut state = block.state();
+        let block = Block::new(key, nonce, counter);
+        let mut state = block.next_nth_state(0);
         assert_eq!(
             state.vec(),
             &[
@@ -304,7 +370,7 @@ mod tests {
         );
 
         assert_eq!(
-            block.block().vec(),
+            block.next_nth_block(0).vec(),
             &[
                 0xe4e7f110, 0x15593bd1, 0x1fdd0f50, 0xc47120a3, //
                 0xc7f4d1c7, 0x0368c033, 0x9aaa2204, 0x4e6cd4c3, //
@@ -342,13 +408,17 @@ mod tests {
         cipher.encrypt(&mut buf);
         assert_eq!(buf, ciphertext);
 
-        #[cfg(feature = "rayon")]
-        {
-            let mut buf = *plaintext;
-            let mut cipher = StreamCipher::new(key, nonce);
-            cipher.par_encrypt(&mut buf);
-            assert_eq!(buf, ciphertext);
-        }
+        let mut buf = *plaintext;
+        let mut cipher = StreamCipher::new(key, nonce);
+        cipher.encrypt(&mut buf[..1]);
+        cipher.encrypt(&mut buf[1..]);
+        assert_eq!(buf, ciphertext);
+
+        let mut buf = *plaintext;
+        let mut cipher = StreamCipher::new(key, nonce);
+        cipher.encrypt(&mut buf[..BLOCK_SIZE]);
+        cipher.encrypt(&mut buf[BLOCK_SIZE..]);
+        assert_eq!(buf, ciphertext);
     }
 }
 
@@ -372,40 +442,266 @@ mod benches {
         StreamCipher::new(key, nonce)
     }
 
-    const PLAINTEXT: &[u8; 114] = b"Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.";
+    fn encrypt_round(buf: &mut [u8], par: ParOrNot) {
+        let mut cipher = stream_cipher();
+        cipher.encrypt_(buf, par);
+        black_box(buf);
+    }
+
+    fn encrypt_round_auto(buf: &mut [u8]) {
+        let mut cipher = stream_cipher();
+        cipher.encrypt(buf);
+        black_box(buf);
+    }
+
+    #[test]
+    fn test_big() {
+        let mut buf_s = [0; 1024];
+        encrypt_round(&mut buf_s, ParOrNot::Serial);
+        let mut buf_p = [0; 1024];
+        encrypt_round(&mut buf_p, ParOrNot::Parallel);
+        assert_eq!(buf_s, buf_p);
+    }
 
     #[bench]
-    fn bench_encrypt(b: &mut Bencher) {
-        for _ in 0..1024 {
-            let mut cipher = stream_cipher();
-            let mut buf = *PLAINTEXT;
-            cipher.encrypt(&mut buf);
-            black_box(buf);
-        }
-
+    fn bench_encrypt_0001_block(b: &mut Bencher) {
+        let mut buf = [0];
         b.iter(|| {
-            let mut cipher = stream_cipher();
-            let mut buf = *PLAINTEXT;
-            cipher.encrypt(&mut buf);
-            black_box(buf);
+            encrypt_round_auto(&mut buf);
+        });
+    }
+    #[bench]
+    fn bench_encrypt_0001_block_serial(b: &mut Bencher) {
+        let mut buf = [0];
+        b.iter(|| {
+            encrypt_round(&mut buf, ParOrNot::Serial);
+        });
+    }
+    #[bench]
+    fn bench_encrypt_0001_block_par(b: &mut Bencher) {
+        let mut buf = [0];
+        b.iter(|| {
+            encrypt_round(&mut buf, ParOrNot::Parallel);
         });
     }
 
-    #[cfg(feature = "rayon")]
     #[bench]
-    fn bench_par_encrypt(b: &mut Bencher) {
-        for _ in 0..1024 {
-            let mut cipher = stream_cipher();
-            let mut buf = *PLAINTEXT;
-            cipher.par_encrypt(&mut buf);
-            black_box(buf);
-        }
-
+    fn bench_encrypt_0002_blocks(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE + 1];
         b.iter(|| {
-            let mut cipher = stream_cipher();
-            let mut buf = *PLAINTEXT;
-            cipher.par_encrypt(&mut buf);
-            black_box(buf);
+            encrypt_round_auto(&mut buf);
+        });
+    }
+    #[bench]
+    fn bench_encrypt_0002_blocks_serial(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE + 1];
+        b.iter(|| {
+            encrypt_round(&mut buf, ParOrNot::Serial);
+        });
+    }
+    #[bench]
+    fn bench_encrypt_0002_blocks_par(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE + 1];
+        b.iter(|| {
+            encrypt_round(&mut buf, ParOrNot::Parallel);
+        });
+    }
+
+    #[bench]
+    fn bench_encrypt_0004_blocks(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 3 + 1];
+        b.iter(|| {
+            encrypt_round_auto(&mut buf);
+        });
+    }
+    #[bench]
+    fn bench_encrypt_0004_blocks_serial(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 3 + 1];
+        b.iter(|| {
+            encrypt_round(&mut buf, ParOrNot::Serial);
+        });
+    }
+    #[bench]
+    fn bench_encrypt_0004_blocks_par(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 3 + 1];
+        b.iter(|| {
+            encrypt_round(&mut buf, ParOrNot::Parallel);
+        });
+    }
+
+    #[bench]
+    fn bench_encrypt_0008_blocks(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 7 + 1];
+        b.iter(|| {
+            encrypt_round_auto(&mut buf);
+        });
+    }
+    #[bench]
+    fn bench_encrypt_0008_blocks_serial(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 7 + 1];
+        b.iter(|| {
+            encrypt_round(&mut buf, ParOrNot::Serial);
+        });
+    }
+    #[bench]
+    fn bench_encrypt_0008_blocks_par(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 7 + 1];
+        b.iter(|| {
+            encrypt_round(&mut buf, ParOrNot::Parallel);
+        });
+    }
+
+    #[bench]
+    fn bench_encrypt_0256_blocks(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 255 + 1];
+        b.iter(|| {
+            encrypt_round_auto(&mut buf);
+        });
+    }
+    #[bench]
+    fn bench_encrypt_0256_blocks_serial(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 255 + 1];
+        b.iter(|| {
+            encrypt_round(&mut buf, ParOrNot::Serial);
+        });
+    }
+    #[bench]
+    fn bench_encrypt_0256_blocks_par(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 255 + 1];
+        b.iter(|| {
+            encrypt_round(&mut buf, ParOrNot::Parallel);
+        });
+    }
+
+    #[bench]
+    fn bench_encrypt_0320_blocks(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 319 + 1];
+        b.iter(|| {
+            encrypt_round_auto(&mut buf);
+        });
+    }
+    #[bench]
+    fn bench_encrypt_0320_blocks_serial(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 319 + 1];
+        b.iter(|| {
+            encrypt_round(&mut buf, ParOrNot::Serial);
+        });
+    }
+    #[bench]
+    fn bench_encrypt_0320_blocks_par(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 319 + 1];
+        b.iter(|| {
+            encrypt_round(&mut buf, ParOrNot::Parallel);
+        });
+    }
+
+    #[bench]
+    fn bench_encrypt_0384_blocks(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 383 + 1];
+        b.iter(|| {
+            encrypt_round_auto(&mut buf);
+        });
+    }
+    #[bench]
+    fn bench_encrypt_0384_blocks_serial(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 383 + 1];
+        b.iter(|| {
+            encrypt_round(&mut buf, ParOrNot::Serial);
+        });
+    }
+    #[bench]
+    fn bench_encrypt_0384_blocks_par(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 383 + 1];
+        b.iter(|| {
+            encrypt_round(&mut buf, ParOrNot::Parallel);
+        });
+    }
+
+    #[bench]
+    fn bench_encrypt_0512_blocks(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 511 + 1];
+        b.iter(|| {
+            encrypt_round_auto(&mut buf);
+        });
+    }
+    #[bench]
+    fn bench_encrypt_0512_blocks_serial(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 511 + 1];
+        b.iter(|| {
+            encrypt_round(&mut buf, ParOrNot::Serial);
+        });
+    }
+    #[bench]
+    fn bench_encrypt_0512_blocks_par(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 511 + 1];
+        b.iter(|| {
+            encrypt_round(&mut buf, ParOrNot::Parallel);
+        });
+    }
+
+    #[bench]
+    fn bench_encrypt_0768_blocks(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 767 + 1];
+        b.iter(|| {
+            encrypt_round_auto(&mut buf);
+        });
+    }
+    #[bench]
+    fn bench_encrypt_0768_blocks_serial(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 767 + 1];
+        b.iter(|| {
+            encrypt_round(&mut buf, ParOrNot::Serial);
+        });
+    }
+    #[bench]
+    fn bench_encrypt_0768_blocks_par(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 767 + 1];
+        b.iter(|| {
+            encrypt_round(&mut buf, ParOrNot::Parallel);
+        });
+    }
+
+    #[bench]
+    fn bench_encrypt_1024_blocks(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 1023 + 1];
+        b.iter(|| {
+            encrypt_round_auto(&mut buf);
+        });
+    }
+    #[bench]
+    fn bench_encrypt_1024_blocks_serial(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 1023 + 1];
+        b.iter(|| {
+            encrypt_round(&mut buf, ParOrNot::Serial);
+        });
+    }
+    #[bench]
+    fn bench_encrypt_1024_blocks_par(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 1023 + 1];
+        b.iter(|| {
+            encrypt_round(&mut buf, ParOrNot::Parallel);
+        });
+    }
+
+    #[bench]
+    fn bench_encrypt_2048_blocks(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 2047 + 1];
+        b.iter(|| {
+            encrypt_round_auto(&mut buf);
+        });
+    }
+    #[bench]
+    fn bench_encrypt_2048_blocks_serial(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 2047 + 1];
+        b.iter(|| {
+            encrypt_round(&mut buf, ParOrNot::Serial);
+        });
+    }
+    #[bench]
+    fn bench_encrypt_2048_blocks_par(b: &mut Bencher) {
+        let mut buf = [0; BLOCK_SIZE * 2047 + 1];
+        b.iter(|| {
+            encrypt_round(&mut buf, ParOrNot::Parallel);
         });
     }
 }
