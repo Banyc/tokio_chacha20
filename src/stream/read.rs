@@ -27,6 +27,8 @@ impl<R: AsyncRead + Unpin> AsyncRead for ReadHalf<R> {
         loop {
             match self.cursor.take().unwrap() {
                 WriteCursorState::Nonce(c) => {
+                    assert!(c.remaining_nonce_size() > 0);
+
                     // let mut buf = vec![0; self.remaining_nonce_size()];
                     let mut buf = ArrayVec::<u8, 12>::from_iter(
                         std::iter::repeat(0).take(c.remaining_nonce_size()),
@@ -34,9 +36,17 @@ impl<R: AsyncRead + Unpin> AsyncRead for ReadHalf<R> {
                     let mut buf = ReadBuf::new(&mut buf);
 
                     // Collect nonce from `r`
+                    let filled_len = buf.filled().len();
                     let ready = Pin::new(&mut self.r).poll_read(cx, &mut buf);
+                    if buf.filled().len() == filled_len {
+                        // `r` hits EOF
+                        return Ok(()).into();
+                    }
+
+                    // Write nonce segments to the cursor
                     let mut buf = io::Cursor::new(buf.filled());
                     let c = c.collect_nonce_from(&mut buf);
+                    assert_eq!(buf.position() as usize, buf.get_ref().len());
                     self.cursor = Some(c);
 
                     ready!(ready)?;
