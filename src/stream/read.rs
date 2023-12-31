@@ -38,18 +38,19 @@ impl<R: AsyncRead + Unpin> AsyncRead for ReadHalf<R> {
                     // Collect nonce from `r`
                     let filled_len = buf.filled().len();
                     let ready = Pin::new(&mut self.r).poll_read(cx, &mut buf);
+
+                    // Write nonce segments to the cursor
+                    let mut rdr = io::Cursor::new(buf.filled());
+                    let c = c.collect_nonce_from(&mut rdr);
+                    assert_eq!(rdr.position() as usize, rdr.get_ref().len());
+                    self.cursor = Some(c);
+
+                    ready!(ready)?;
+
                     if buf.filled().len() == filled_len {
                         // `r` hits EOF
                         return Ok(()).into();
                     }
-
-                    // Write nonce segments to the cursor
-                    let mut buf = io::Cursor::new(buf.filled());
-                    let c = c.collect_nonce_from(&mut buf);
-                    assert_eq!(buf.position() as usize, buf.get_ref().len());
-                    self.cursor = Some(c);
-
-                    ready!(ready)?;
                 }
                 WriteCursorState::UserData(mut c) => {
                     // Read data from the `r`
