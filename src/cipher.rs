@@ -1,3 +1,4 @@
+use arrayvec::ArrayVec;
 use rayon::prelude::*;
 
 const CONSTANT: &[u8; 16] = b"expand 32-byte k";
@@ -88,47 +89,8 @@ impl StreamCipher {
             .increment_counter(buf.chunks(BLOCK_SIZE).count() as u32);
     }
 
-    pub fn par_encrypt(&mut self, buf: &mut [u8]) {
-        let mut pos = 0;
-
-        // Consume the leftover
-        if let Some((state, next)) = self.leftover.take() {
-            let remaining = &state.byte_vec()[next..];
-
-            let size = xor(buf, remaining);
-            pos += size;
-
-            let next = next + size;
-            if next != state.byte_vec().len() {
-                self.leftover = Some((state, next));
-                return;
-            }
-        }
-        assert!(self.leftover.is_none());
-
-        let buf = &mut buf[pos..];
-
-        // Milk the blocks
-        const BLOCK_SIZE: usize = 64;
-        buf.par_chunks_exact_mut(BLOCK_SIZE)
-            .enumerate()
-            .for_each(|(i, c)| {
-                let state = self.block.next_nth_block(i as u32);
-                let size = xor(c, state.byte_vec());
-                assert_eq!(size, state.byte_vec().len());
-                assert_eq!(size, c.len());
-            });
-
-        // Last `buf` chuck
-        let i = buf.chunks_exact(BLOCK_SIZE).count();
-        let c = buf.chunks_exact_mut(BLOCK_SIZE).into_remainder();
-        if !c.is_empty() {
-            let state = self.block.next_nth_block(i as u32);
-            let size = xor(c, state.byte_vec());
-            self.leftover = Some((state, size));
-        }
-        self.block
-            .increment_counter(buf.chunks(BLOCK_SIZE).count() as u32);
+    pub fn block(&self) -> &Block {
+        &self.block
     }
 }
 
@@ -215,6 +177,16 @@ impl Block {
 
     pub fn increment_counter(&mut self, n: u32) {
         self.counter = self.counter.wrapping_add(n);
+    }
+
+    pub fn nonce(&self) -> [u8; 12] {
+        let nonce: ArrayVec<u8, 12> = self.nonce.iter().flat_map(|n| n.to_le_bytes()).collect();
+        nonce.as_slice().try_into().unwrap()
+    }
+
+    pub fn key(&self) -> [u8; 32] {
+        let key: ArrayVec<u8, 32> = self.key.iter().flat_map(|n| n.to_le_bytes()).collect();
+        key.as_slice().try_into().unwrap()
     }
 }
 

@@ -1,5 +1,7 @@
 use std::io;
 
+use crate::mac::poly1305_key_gen;
+
 use super::{NonceWriteCursor, WriteCursorState};
 
 pub struct DecryptCursor {
@@ -42,5 +44,14 @@ impl DecryptCursor {
             WriteCursorState::Nonce(c) => c.remaining_nonce_size(),
             WriteCursorState::UserData(_) => 0,
         }
+    }
+
+    pub fn poly1305_key(&self) -> Option<[u8; 32]> {
+        let WriteCursorState::UserData(c) = self.state.as_ref().unwrap() else {
+            return None;
+        };
+        let key = c.cipher().block().key();
+        let nonce = c.cipher().block().nonce();
+        Some(poly1305_key_gen(key, nonce))
     }
 }

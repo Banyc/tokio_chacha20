@@ -41,6 +41,14 @@ impl NonceReadCursor {
         let cipher = StreamCipher::new(self.key, self.nonce.into_inner());
         Ok(UserDataCursor::new(cipher))
     }
+
+    pub fn key(&self) -> &[u8; 32] {
+        &self.key
+    }
+
+    pub fn nonce(&self) -> &[u8; 12] {
+        self.nonce.get_ref()
+    }
 }
 
 #[derive(Debug, Clone)]

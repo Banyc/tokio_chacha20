@@ -12,4 +12,8 @@ impl UserDataCursor {
     pub fn xor(&mut self, buf: &mut [u8]) {
         self.cipher.encrypt(buf);
     }
+
+    pub fn cipher(&self) -> &StreamCipher {
+        &self.cipher
+    }
 }
