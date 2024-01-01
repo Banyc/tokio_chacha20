@@ -9,6 +9,7 @@ edition = "2021"
 arrayvec = "0.7"
 base64 = "0.21"
 blake3 = "1"
+num-bigint = "0.4"
 rand = "0.8"
 rayon = { version = "1" }
 serde = { version = "1", features = ["derive"] }
