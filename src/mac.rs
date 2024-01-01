@@ -1,6 +1,8 @@
 use arrayvec::ArrayVec;
 use num_bigint::BigUint;
 
+use crate::cipher::Block;
+
 fn clamp_r(r: &mut [u8; 16]) {
     r[3] &= 0xF;
     r[7] &= 0xF;
@@ -19,6 +21,7 @@ fn s(key: &[u8; 32]) -> [u8; 16] {
     key[16..32].try_into().unwrap()
 }
 
+/// `key`: Should be a one-time key generated from `poly1305_key_gen`
 pub fn poly1305_mac(key: [u8; 32], msg: &[u8]) -> [u8; 16] {
     let mut r: [u8; 16] = r(&key);
     let s: [u8; 16] = s(&key);
@@ -45,6 +48,21 @@ pub fn poly1305_mac(key: [u8; 32], msg: &[u8]) -> [u8; 16] {
     let n = 16 - cum.len();
     cum.extend(std::iter::repeat(0).take(n));
     cum.try_into().unwrap()
+}
+
+/// Generate a one-time key for `poly1305_mac`
+pub fn poly1305_key_gen_8_byte_nonce(key: [u8; 32], nonce: [u8; 8]) -> [u8; 32] {
+    let mut nonce: ArrayVec<u8, 12> = nonce.as_slice().try_into().unwrap();
+    nonce.extend(std::iter::repeat(0).take(12 - 8));
+    poly1305_key_gen(key, nonce.as_slice().try_into().unwrap())
+}
+
+/// Generate a one-time key for `poly1305_mac`
+pub fn poly1305_key_gen(key: [u8; 32], nonce: [u8; 12]) -> [u8; 32] {
+    let counter = 0;
+    let block = Block::new(key, nonce, counter);
+    let block = block.next_nth_block(0);
+    block.byte_vec()[0..32].try_into().unwrap()
 }
 
 #[cfg(test)]
@@ -90,6 +108,27 @@ mod tests {
             [
                 0xa8, 0x06, 0x1d, 0xc1, 0x30, 0x51, 0x36, 0xc6, 0xc2, 0x2b, 0x8b, 0xaf, 0x0c, 0x01,
                 0x27, 0xa9,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_key_gen() {
+        let key = [
+            0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8d,
+            0x8e, 0x8f, 0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9a, 0x9b,
+            0x9c, 0x9d, 0x9e, 0x9f,
+        ];
+        let nonce = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        ];
+        let key = poly1305_key_gen(key, nonce);
+        assert_eq!(
+            key,
+            [
+                0x8a, 0xd5, 0xa0, 0x8b, 0x90, 0x5f, 0x81, 0xcc, 0x81, 0x50, 0x40, 0x27, 0x4a, 0xb2,
+                0x94, 0x71, 0xa8, 0x33, 0xb6, 0x37, 0xe3, 0xfd, 0x0d, 0xa5, 0x08, 0xdb, 0xb8, 0xe2,
+                0xfd, 0xd1, 0xa6, 0x46,
             ]
         );
     }
