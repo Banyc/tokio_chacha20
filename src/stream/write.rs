@@ -5,7 +5,10 @@ use std::{
 
 use tokio::io::AsyncWrite;
 
-use crate::cursor::{NonceReadCursor, ReadCursorState};
+use crate::{
+    cursor::{NonceReadCursor, ReadCursorState},
+    KEY_BYTES,
+};
 
 #[derive(Debug)]
 pub struct WriteHalf<W> {
@@ -14,7 +17,7 @@ pub struct WriteHalf<W> {
     buf: Option<Vec<u8>>,
 }
 impl<W> WriteHalf<W> {
-    pub fn new(key: [u8; 32], w: W) -> Self {
+    pub fn new(key: [u8; KEY_BYTES], w: W) -> Self {
         let cursor = NonceReadCursor::new(key);
         let cursor = Some(ReadCursorState::Nonce(cursor));
         let buf = Some(vec![]);

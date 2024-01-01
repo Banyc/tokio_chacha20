@@ -4,6 +4,8 @@ use base64::prelude::*;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::KEY_BYTES;
+
 pub type ConfigKey = Arc<[u8]>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -29,7 +31,7 @@ pub struct ConfigBuildError {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub struct Config {
-    key: [u8; 32],
+    key: [u8; KEY_BYTES],
 }
 impl Config {
     pub fn new(key: ConfigKey) -> Self {
@@ -40,7 +42,7 @@ impl Config {
         Self { key }
     }
 
-    pub fn key(&self) -> &[u8; 32] {
+    pub fn key(&self) -> &[u8; KEY_BYTES] {
         &self.key
     }
 }
@@ -50,7 +52,7 @@ pub mod tests {
     use super::*;
 
     pub fn create_random_config() -> Config {
-        let key: [u8; 32] = rand::random();
+        let key: [u8; KEY_BYTES] = rand::random();
         Config::new(key.into())
     }
 

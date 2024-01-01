@@ -1,9 +1,11 @@
 use arrayvec::ArrayVec;
 use num_bigint::BigUint;
 
-use crate::cipher::Block;
+use crate::{cipher::Block, KEY_BYTES, NONCE_BYTES};
 
-fn clamp_r(r: &mut [u8; 16]) {
+pub const BLOCK_BYTES: usize = 16;
+
+fn clamp_r(r: &mut [u8; BLOCK_BYTES]) {
     r[3] &= 0xF;
     r[7] &= 0xF;
     r[11] &= 0xF;
@@ -13,18 +15,18 @@ fn clamp_r(r: &mut [u8; 16]) {
     r[12] &= 0b1111_1100;
 }
 
-fn r(key: &[u8; 32]) -> [u8; 16] {
-    key[0..16].try_into().unwrap()
+fn r(key: &[u8; KEY_BYTES]) -> [u8; BLOCK_BYTES] {
+    key[..BLOCK_BYTES].try_into().unwrap()
 }
 
-fn s(key: &[u8; 32]) -> [u8; 16] {
-    key[16..32].try_into().unwrap()
+fn s(key: &[u8; KEY_BYTES]) -> [u8; BLOCK_BYTES] {
+    key[BLOCK_BYTES..].try_into().unwrap()
 }
 
 /// `key`: Should be a one-time key generated from `poly1305_key_gen`
-pub fn poly1305_mac(key: [u8; 32], msg: &[u8]) -> [u8; 16] {
-    let mut r: [u8; 16] = r(&key);
-    let s: [u8; 16] = s(&key);
+pub fn poly1305_mac(key: [u8; KEY_BYTES], msg: &[u8]) -> [u8; BLOCK_BYTES] {
+    let mut r: [u8; BLOCK_BYTES] = r(&key);
+    let s: [u8; BLOCK_BYTES] = s(&key);
     clamp_r(&mut r);
     let mut cum = BigUint::new(vec![0]);
 
@@ -32,10 +34,9 @@ pub fn poly1305_mac(key: [u8; 32], msg: &[u8]) -> [u8; 16] {
     let s = BigUint::from_bytes_le(&s);
     let p = BigUint::new(vec![2]).pow(130) - BigUint::new(vec![5]);
 
-    const BLOCK_SIZE: usize = 16;
-    const BLOCK_SIZE_PLUS_1: usize = BLOCK_SIZE + 1;
-    msg.chunks(BLOCK_SIZE).for_each(|c| {
-        let mut n: ArrayVec<u8, BLOCK_SIZE_PLUS_1> = c.try_into().unwrap();
+    const BLOCK_BYTES_PLUS_1: usize = BLOCK_BYTES + 1;
+    msg.chunks(BLOCK_BYTES).for_each(|c| {
+        let mut n: ArrayVec<u8, BLOCK_BYTES_PLUS_1> = c.try_into().unwrap();
         n.push(0x1);
         let n = BigUint::from_bytes_le(&n);
         cum += n;
@@ -51,18 +52,18 @@ pub fn poly1305_mac(key: [u8; 32], msg: &[u8]) -> [u8; 16] {
 }
 
 /// Generate a one-time key for `poly1305_mac`
-pub fn poly1305_key_gen_8_byte_nonce(key: [u8; 32], nonce: [u8; 8]) -> [u8; 32] {
+pub fn poly1305_key_gen_8_byte_nonce(key: [u8; KEY_BYTES], nonce: [u8; 8]) -> [u8; KEY_BYTES] {
     let mut nonce: ArrayVec<u8, 12> = nonce.as_slice().try_into().unwrap();
     nonce.extend(std::iter::repeat(0).take(12 - 8));
     poly1305_key_gen(key, nonce.as_slice().try_into().unwrap())
 }
 
 /// Generate a one-time key for `poly1305_mac`
-pub fn poly1305_key_gen(key: [u8; 32], nonce: [u8; 12]) -> [u8; 32] {
+pub fn poly1305_key_gen(key: [u8; KEY_BYTES], nonce: [u8; NONCE_BYTES]) -> [u8; KEY_BYTES] {
     let counter = 0;
     let block = Block::new(key, nonce, counter);
     let block = block.next_nth_block(0);
-    block.byte_vec()[0..32].try_into().unwrap()
+    block.byte_vec()[..KEY_BYTES].try_into().unwrap()
 }
 
 #[cfg(test)]

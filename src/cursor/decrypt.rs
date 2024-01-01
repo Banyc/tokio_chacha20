@@ -1,6 +1,6 @@
 use std::io;
 
-use crate::mac::poly1305_key_gen;
+use crate::{mac::poly1305_key_gen, KEY_BYTES};
 
 use super::{NonceWriteCursor, WriteCursorState};
 
@@ -9,7 +9,7 @@ pub struct DecryptCursor {
 }
 
 impl DecryptCursor {
-    pub fn new(key: [u8; 32]) -> Self {
+    pub fn new(key: [u8; KEY_BYTES]) -> Self {
         let state = Some(WriteCursorState::Nonce(NonceWriteCursor::new(key)));
         Self { state }
     }
@@ -46,7 +46,7 @@ impl DecryptCursor {
         }
     }
 
-    pub fn poly1305_key(&self) -> Option<[u8; 32]> {
+    pub fn poly1305_key(&self) -> Option<[u8; KEY_BYTES]> {
         let WriteCursorState::UserData(c) = self.state.as_ref().unwrap() else {
             return None;
         };

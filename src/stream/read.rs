@@ -3,7 +3,10 @@ use std::{io, pin::Pin, task::ready};
 use arrayvec::ArrayVec;
 use tokio::io::{AsyncRead, ReadBuf};
 
-use crate::cursor::{NonceWriteCursor, WriteCursorState};
+use crate::{
+    cursor::{NonceWriteCursor, WriteCursorState},
+    KEY_BYTES,
+};
 
 #[derive(Debug)]
 pub struct ReadHalf<R> {
@@ -11,7 +14,7 @@ pub struct ReadHalf<R> {
     r: R,
 }
 impl<R> ReadHalf<R> {
-    pub fn new(key: [u8; 32], r: R) -> Self {
+    pub fn new(key: [u8; KEY_BYTES], r: R) -> Self {
         let cursor = NonceWriteCursor::new(key);
         let cursor = Some(WriteCursorState::Nonce(cursor));
         Self { cursor, r }

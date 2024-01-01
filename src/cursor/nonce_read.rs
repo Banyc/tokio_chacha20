@@ -2,18 +2,18 @@ use std::io::{self, BufRead};
 
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
-use crate::cipher::StreamCipher;
+use crate::{cipher::StreamCipher, KEY_BYTES, NONCE_BYTES};
 
 use super::user_data::UserDataCursor;
 
 #[derive(Debug, Clone)]
 pub struct NonceReadCursor {
-    key: [u8; 32],
-    nonce: io::Cursor<[u8; 12]>,
+    key: [u8; KEY_BYTES],
+    nonce: io::Cursor<[u8; NONCE_BYTES]>,
 }
 impl NonceReadCursor {
-    pub fn new(key: [u8; 32]) -> Self {
-        let nonce: [u8; 12] = rand::random();
+    pub fn new(key: [u8; KEY_BYTES]) -> Self {
+        let nonce: [u8; NONCE_BYTES] = rand::random();
         let nonce = io::Cursor::new(nonce);
         Self { key, nonce }
     }
@@ -42,11 +42,11 @@ impl NonceReadCursor {
         Ok(UserDataCursor::new(cipher))
     }
 
-    pub fn key(&self) -> &[u8; 32] {
+    pub fn key(&self) -> &[u8; KEY_BYTES] {
         &self.key
     }
 
-    pub fn nonce(&self) -> &[u8; 12] {
+    pub fn nonce(&self) -> &[u8; NONCE_BYTES] {
         self.nonce.get_ref()
     }
 }

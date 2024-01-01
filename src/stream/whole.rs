@@ -2,6 +2,8 @@ use std::pin::Pin;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
+use crate::KEY_BYTES;
+
 use super::{read::ReadHalf, write::WriteHalf};
 
 #[derive(Debug)]
@@ -14,7 +16,7 @@ impl<R, W> WholeStream<R, W> {
         Self { r, w }
     }
 
-    pub fn from_key_halves(key: [u8; 32], r: R, w: W) -> Self {
+    pub fn from_key_halves(key: [u8; KEY_BYTES], r: R, w: W) -> Self {
         let r = ReadHalf::new(key, r);
         let w = WriteHalf::new(key, w);
         Self { r, w }

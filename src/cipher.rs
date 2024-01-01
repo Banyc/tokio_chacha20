@@ -1,6 +1,8 @@
 use arrayvec::ArrayVec;
 use rayon::prelude::*;
 
+use crate::{KEY_BYTES, NONCE_BYTES};
+
 const CONSTANT: &[u8; 16] = b"expand 32-byte k";
 const BLOCK_SIZE: usize = 64;
 const PAR_OUTER_CHUNK_SIZE: usize = 64;
@@ -12,7 +14,7 @@ pub struct StreamCipher {
     leftover: Option<(State, usize)>,
 }
 impl StreamCipher {
-    pub fn new(key: [u8; 32], nonce: [u8; 12]) -> Self {
+    pub fn new(key: [u8; KEY_BYTES], nonce: [u8; NONCE_BYTES]) -> Self {
         let block = Block::new(key, nonce, 1);
         Self {
             block,
@@ -119,7 +121,7 @@ pub struct Block {
     counter: u32,
 }
 impl Block {
-    pub fn new(key: [u8; 32], nonce: [u8; 12], counter: u32) -> Self {
+    pub fn new(key: [u8; KEY_BYTES], nonce: [u8; NONCE_BYTES], counter: u32) -> Self {
         let constant = [
             u32::from_le_bytes(CONSTANT[0..4].try_into().unwrap()),
             u32::from_le_bytes(CONSTANT[4..8].try_into().unwrap()),
@@ -179,12 +181,12 @@ impl Block {
         self.counter = self.counter.wrapping_add(n);
     }
 
-    pub fn nonce(&self) -> [u8; 12] {
+    pub fn nonce(&self) -> [u8; NONCE_BYTES] {
         let nonce: ArrayVec<u8, 12> = self.nonce.iter().flat_map(|n| n.to_le_bytes()).collect();
         nonce.as_slice().try_into().unwrap()
     }
 
-    pub fn key(&self) -> [u8; 32] {
+    pub fn key(&self) -> [u8; KEY_BYTES] {
         let key: ArrayVec<u8, 32> = self.key.iter().flat_map(|n| n.to_le_bytes()).collect();
         key.as_slice().try_into().unwrap()
     }
