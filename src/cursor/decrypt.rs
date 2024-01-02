@@ -1,6 +1,6 @@
 use std::io;
 
-use crate::{mac::poly1305_key_gen, KEY_BYTES};
+use crate::{mac::poly1305_key_gen, KEY_BYTES, NONCE_BYTES};
 
 use super::{NonceWriteCursor, WriteCursorState};
 
@@ -47,11 +47,18 @@ impl DecryptCursor {
     }
 
     pub fn poly1305_key(&self) -> Option<[u8; KEY_BYTES]> {
+        self.poly1305_key_map_nonce(|x| x)
+    }
+
+    pub fn poly1305_key_map_nonce(
+        &self,
+        map_nonce: impl Fn([u8; NONCE_BYTES]) -> [u8; NONCE_BYTES],
+    ) -> Option<[u8; KEY_BYTES]> {
         let WriteCursorState::UserData(c) = self.state.as_ref().unwrap() else {
             return None;
         };
         let key = c.cipher().block().key();
         let nonce = c.cipher().block().nonce();
-        Some(poly1305_key_gen(key, nonce))
+        Some(poly1305_key_gen(key, map_nonce(nonce)))
     }
 }
