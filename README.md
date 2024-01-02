@@ -1,5 +1,7 @@
 # `tokio_chacha20`
 
+ChaCha20 and Poly1305 primitives (primitives are not AEAD).
+
 ## How to use
 
 Async:
@@ -21,7 +23,6 @@ server.read_exact(&mut buf[..data.len()]).await.unwrap();
 
 Sync:
 
-
 ```rust
 let config = create_random_config();
 
@@ -33,5 +34,5 @@ let mut buf = [0; 1024];
 let (_, n) = en.encrypt(msg, &mut buf).unwrap();
 let i = de.decrypt(&mut buf[..n]).unwrap();
 let i = i.unwrap();
-assert_eq!(&buf[i..n], &msg[..]);        
+assert_eq!(&buf[i..n], &msg[..]);
 ```
