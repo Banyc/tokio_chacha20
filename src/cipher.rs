@@ -1,7 +1,7 @@
 use arrayvec::ArrayVec;
 use rayon::prelude::*;
 
-use crate::{KEY_BYTES, NONCE_BYTES};
+use crate::{KEY_BYTES, NONCE_BYTES, X_NONCE_BYTES};
 
 const CONSTANT: &[u8; 16] = b"expand 32-byte k";
 const BLOCK_SIZE: usize = 64;
@@ -14,6 +14,13 @@ pub struct StreamCipher {
     leftover: Option<(State, usize)>,
 }
 impl StreamCipher {
+    pub fn new_x(key: [u8; KEY_BYTES], nonce: [u8; X_NONCE_BYTES]) -> Self {
+        let subkey = hchacha20(key, nonce[..16].try_into().unwrap());
+        let mut chacha20_nonce = [0; NONCE_BYTES];
+        chacha20_nonce[4..].copy_from_slice(&nonce[16..]);
+        Self::new(subkey, chacha20_nonce)
+    }
+
     pub fn new(key: [u8; KEY_BYTES], nonce: [u8; NONCE_BYTES]) -> Self {
         let block = Block::new(key, nonce, 1);
         Self {
@@ -53,7 +60,7 @@ impl StreamCipher {
         // Milk the blocks
         let xor_full_block = |(i, c): (usize, &mut [u8])| {
             let state = self.block.next_nth_block(i as u32);
-            let size = xor(c, state.byte_vec());
+            let size = xor(c, &state.byte_vec());
             assert_eq!(size, state.byte_vec().len());
             assert_eq!(size, c.len());
         };
@@ -84,7 +91,7 @@ impl StreamCipher {
         let c = buf.chunks_exact_mut(BLOCK_SIZE).into_remainder();
         if !c.is_empty() {
             let state = self.block.next_nth_block(i as u32);
-            let size = xor(c, state.byte_vec());
+            let size = xor(c, &state.byte_vec());
             self.leftover = Some((state, size));
         }
         self.block
@@ -111,6 +118,48 @@ fn xor(buf: &mut [u8], other: &[u8]) -> usize {
         .for_each(|(b, s)| *b ^= s);
 
     size
+}
+
+fn hchacha20(key: [u8; KEY_BYTES], nonce: [u8; 16]) -> [u8; KEY_BYTES] {
+    let counter: [u8; size_of::<u32>()] = nonce[..size_of::<u32>()].try_into().unwrap();
+    let counter = u32::from_le_bytes(counter);
+    let nonce: [u8; 12] = nonce[size_of::<u32>()..].try_into().unwrap();
+    let block = Block::new(key, nonce, counter);
+    let mut state = block.next_nth_state(0);
+    state.inner_block();
+
+    let mut out = [0; KEY_BYTES];
+    let mut out_pos = 0;
+    for offset in [0, 12] {
+        for i in 0..4 {
+            let bytes = state.vec()[i + offset].to_le_bytes();
+            out[out_pos..out_pos + size_of::<u32>()].copy_from_slice(&bytes);
+            out_pos += size_of::<u32>();
+        }
+    }
+    out
+}
+#[cfg(test)]
+#[test]
+fn test_h_cha_cha_20() {
+    let key = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d,
+        0x1e, 0x1f,
+    ];
+    let nonce = [
+        0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x4a, 0x00, 0x00, 0x00, 0x00, 0x31, 0x41, 0x59,
+        0x27,
+    ];
+    let out = hchacha20(key, nonce);
+    assert_eq!(
+        out,
+        [
+            0x82, 0x41, 0x3b, 0x42, 0x27, 0xb2, 0x7b, 0xfe, 0xd3, 0x0e, 0x42, 0x50, 0x8a, 0x87,
+            0x7d, 0x73, 0xa0, 0xf9, 0xe4, 0xd5, 0x8a, 0x74, 0xa8, 0x53, 0xc1, 0x2e, 0xc4, 0x13,
+            0x26, 0xd3, 0xec, 0xdc,
+        ]
+    );
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -170,7 +219,7 @@ impl Block {
         let mut state = self.next_nth_state(n);
         let mut working_state = state;
 
-        inner_block(&mut working_state);
+        working_state.inner_block();
 
         state.add(working_state.vec());
 
@@ -192,19 +241,6 @@ impl Block {
     }
 }
 
-fn inner_block(state: &mut State) {
-    (0..10).for_each(|_| {
-        state.quarter_round(0, 4, 8, 12);
-        state.quarter_round(1, 5, 9, 13);
-        state.quarter_round(2, 6, 10, 14);
-        state.quarter_round(3, 7, 11, 15);
-        state.quarter_round(0, 5, 10, 15);
-        state.quarter_round(1, 6, 11, 12);
-        state.quarter_round(2, 7, 8, 13);
-        state.quarter_round(3, 4, 9, 14);
-    });
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct State {
     vec: [u32; 16],
@@ -218,8 +254,9 @@ impl State {
         &self.vec
     }
 
-    pub fn byte_vec(&self) -> &[u8; 64] {
-        unsafe { std::mem::transmute(&self.vec) }
+    pub fn byte_vec(&self) -> [u8; 64] {
+        let vec: ArrayVec<u8, 64> = self.vec.iter().flat_map(|n| n.to_le_bytes()).collect();
+        vec.as_slice().try_into().unwrap()
     }
 
     pub fn quarter_round(&mut self, a: usize, b: usize, c: usize, d: usize) {
@@ -250,6 +287,19 @@ impl State {
             .iter_mut()
             .zip(vec)
             .for_each(|(a, b)| *a = a.wrapping_add(*b));
+    }
+
+    pub fn inner_block(&mut self) {
+        for _ in 0..10 {
+            self.quarter_round(0, 4, 8, 12);
+            self.quarter_round(1, 5, 9, 13);
+            self.quarter_round(2, 6, 10, 14);
+            self.quarter_round(3, 7, 11, 15);
+            self.quarter_round(0, 5, 10, 15);
+            self.quarter_round(1, 6, 11, 12);
+            self.quarter_round(2, 7, 8, 13);
+            self.quarter_round(3, 4, 9, 14);
+        }
     }
 }
 
@@ -332,7 +382,7 @@ mod tests {
             ]
         );
 
-        inner_block(&mut state);
+        state.inner_block();
         assert_eq!(
             state.vec(),
             &[
