@@ -13,6 +13,10 @@ impl DecryptCursor {
         let state = Some(WriteCursorState::Nonce(NonceWriteCursor::new(key)));
         Self { state }
     }
+    pub fn new_x(key: [u8; KEY_BYTES]) -> Self {
+        let state = Some(WriteCursorState::Nonce(NonceWriteCursor::new_x(key)));
+        Self { state }
+    }
 
     /// Return the start index of the decrypted user data
     pub fn decrypt(&mut self, buf: &mut [u8]) -> Option<usize> {

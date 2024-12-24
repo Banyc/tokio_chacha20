@@ -2,35 +2,47 @@ use std::io::{self, Read};
 
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use crate::{cipher::StreamCipher, KEY_BYTES, NONCE_BYTES};
+use crate::{cipher::StreamCipher, KEY_BYTES, NONCE_BYTES, X_NONCE_BYTES};
 
-use super::user_data::UserDataCursor;
+use super::{user_data::UserDataCursor, NonceCursor};
 
 #[derive(Debug, Clone)]
 pub struct NonceWriteCursor {
     key: [u8; KEY_BYTES],
-    nonce: io::Cursor<[u8; NONCE_BYTES]>,
+    nonce: NonceCursor,
 }
 impl NonceWriteCursor {
     pub fn new(key: [u8; KEY_BYTES]) -> Self {
         let nonce = io::Cursor::new([0; NONCE_BYTES]);
-        Self { key, nonce }
+        Self {
+            key,
+            nonce: NonceCursor::Nonce(nonce),
+        }
+    }
+    pub fn new_x(key: [u8; KEY_BYTES]) -> Self {
+        let nonce = io::Cursor::new([0; X_NONCE_BYTES]);
+        Self {
+            key,
+            nonce: NonceCursor::XNonce(nonce),
+        }
     }
 
     pub fn remaining_nonce_size(&self) -> usize {
-        self.nonce.get_ref().len() - self.nonce.position() as usize
+        self.nonce.remaining().len()
     }
 
     pub fn collect_nonce_from(mut self, r: &mut io::Cursor<&[u8]>) -> WriteCursorState {
-        let pos = self.nonce.position() as usize;
-        let n = Read::read(r, &mut self.nonce.get_mut()[pos..]).unwrap();
-        self.nonce.set_position((pos + n) as u64);
+        let n = Read::read(r, self.nonce.remaining_mut()).unwrap();
+        self.nonce.consume(n);
 
-        if self.nonce.get_ref().len() != self.nonce.position() as usize {
+        if !self.nonce.complete() {
             return WriteCursorState::Nonce(self);
         }
 
-        let cipher = StreamCipher::new(self.key, self.nonce.into_inner());
+        let cipher = match self.nonce {
+            NonceCursor::Nonce(cursor) => StreamCipher::new(self.key, cursor.into_inner()),
+            NonceCursor::XNonce(cursor) => StreamCipher::new_x(self.key, cursor.into_inner()),
+        };
         let cursor = UserDataCursor::new(cipher);
         WriteCursorState::UserData(cursor)
     }
@@ -39,9 +51,11 @@ impl NonceWriteCursor {
         mut self,
         r: &mut R,
     ) -> io::Result<UserDataCursor> {
-        let pos = self.nonce.position() as usize;
-        AsyncReadExt::read_exact(r, &mut self.nonce.get_mut()[pos..]).await?;
-        let cipher = StreamCipher::new(self.key, self.nonce.into_inner());
+        AsyncReadExt::read_exact(r, self.nonce.remaining_mut()).await?;
+        let cipher = match self.nonce {
+            NonceCursor::Nonce(cursor) => StreamCipher::new(self.key, cursor.into_inner()),
+            NonceCursor::XNonce(cursor) => StreamCipher::new_x(self.key, cursor.into_inner()),
+        };
         let cursor = UserDataCursor::new(cipher);
         Ok(cursor)
     }

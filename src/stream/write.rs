@@ -23,6 +23,12 @@ impl<W> WriteHalf<W> {
         let buf = Some(vec![]);
         Self { cursor, w, buf }
     }
+    pub fn new_x(key: [u8; KEY_BYTES], w: W) -> Self {
+        let cursor = NonceReadCursor::new_x(key);
+        let cursor = Some(ReadCursorState::Nonce(cursor));
+        let buf = Some(vec![]);
+        Self { cursor, w, buf }
+    }
 }
 impl<W: AsyncWrite + Unpin> AsyncWrite for WriteHalf<W> {
     fn poll_write(

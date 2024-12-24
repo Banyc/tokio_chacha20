@@ -19,6 +19,11 @@ impl<R> ReadHalf<R> {
         let cursor = Some(WriteCursorState::Nonce(cursor));
         Self { cursor, r }
     }
+    pub fn new_x(key: [u8; KEY_BYTES], r: R) -> Self {
+        let cursor = NonceWriteCursor::new_x(key);
+        let cursor = Some(WriteCursorState::Nonce(cursor));
+        Self { cursor, r }
+    }
 }
 impl<R: AsyncRead + Unpin> AsyncRead for ReadHalf<R> {
     fn poll_read(

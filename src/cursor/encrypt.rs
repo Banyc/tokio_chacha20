@@ -11,6 +11,10 @@ impl EncryptCursor {
         let state = Some(ReadCursorState::Nonce(NonceReadCursor::new(key)));
         Self { state }
     }
+    pub fn new_x(key: [u8; KEY_BYTES]) -> Self {
+        let state = Some(ReadCursorState::Nonce(NonceReadCursor::new_x(key)));
+        Self { state }
+    }
 
     /// Return the amount of bytes read from `from` and the amount of bytes written to `to`
     pub fn encrypt(&mut self, from: &[u8], to: &mut [u8]) -> (usize, usize) {
@@ -54,7 +58,7 @@ impl EncryptCursor {
             ReadCursorState::UserData(c) => c.cipher().block().key(),
         };
         let nonce = match self.state.as_ref().unwrap() {
-            ReadCursorState::Nonce(c) => *c.nonce(),
+            ReadCursorState::Nonce(c) => c.chacha20_nonce(),
             ReadCursorState::UserData(c) => c.cipher().block().nonce(),
         };
         poly1305_key_gen(key, map_nonce(nonce))

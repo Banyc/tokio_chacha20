@@ -14,19 +14,16 @@ pub struct StreamCipher {
     leftover: Option<(State, usize)>,
 }
 impl StreamCipher {
-    pub fn new_x(key: [u8; KEY_BYTES], nonce: [u8; X_NONCE_BYTES]) -> Self {
-        let subkey = hchacha20(key, nonce[..16].try_into().unwrap());
-        let mut chacha20_nonce = [0; NONCE_BYTES];
-        chacha20_nonce[4..].copy_from_slice(&nonce[16..]);
-        Self::new(subkey, chacha20_nonce)
-    }
-
     pub fn new(key: [u8; KEY_BYTES], nonce: [u8; NONCE_BYTES]) -> Self {
         let block = Block::new(key, nonce, 1);
         Self {
             block,
             leftover: None,
         }
+    }
+    pub fn new_x(key: [u8; KEY_BYTES], nonce: [u8; X_NONCE_BYTES]) -> Self {
+        let subkey = hchacha20(key, nonce[..16].try_into().unwrap());
+        Self::new(subkey, chacha20_nonce_from_xnonce(nonce))
     }
 
     pub fn encrypt(&mut self, buf: &mut [u8]) {
@@ -118,6 +115,12 @@ fn xor(buf: &mut [u8], other: &[u8]) -> usize {
         .for_each(|(b, s)| *b ^= s);
 
     size
+}
+
+pub(crate) fn chacha20_nonce_from_xnonce(nonce: [u8; X_NONCE_BYTES]) -> [u8; NONCE_BYTES] {
+    let mut chacha20_nonce = [0; NONCE_BYTES];
+    chacha20_nonce[4..].copy_from_slice(&nonce[16..]);
+    chacha20_nonce
 }
 
 fn hchacha20(key: [u8; KEY_BYTES], nonce: [u8; 16]) -> [u8; KEY_BYTES] {
