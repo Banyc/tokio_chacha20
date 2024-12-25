@@ -1,7 +1,7 @@
 use arrayvec::ArrayVec;
 use num_bigint::BigUint;
 
-use crate::{cipher::Block, KEY_BYTES, NONCE_BYTES};
+use crate::{cipher::ChaCha20, KEY_BYTES, NONCE_BYTES};
 
 pub const BLOCK_BYTES: usize = 16;
 
@@ -61,7 +61,7 @@ pub fn poly1305_key_gen_8_byte_nonce(key: [u8; KEY_BYTES], nonce: [u8; 8]) -> [u
 /// Generate a one-time key for `poly1305_mac`
 pub fn poly1305_key_gen(key: [u8; KEY_BYTES], nonce: [u8; NONCE_BYTES]) -> [u8; KEY_BYTES] {
     let counter = 0;
-    let block = Block::new(key, nonce, counter);
+    let block = ChaCha20::new(key, nonce, counter);
     let block = block.next_nth_block(0);
     block.byte_vec()[..KEY_BYTES].try_into().unwrap()
 }

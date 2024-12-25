@@ -10,12 +10,12 @@ const PAR_BLOCKS_THRESHOLD: usize = 320;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StreamCipher {
-    block: Block,
+    block: ChaCha20,
     leftover: Option<(State, usize)>,
 }
 impl StreamCipher {
     pub fn new(key: [u8; KEY_BYTES], nonce: [u8; NONCE_BYTES]) -> Self {
-        let block = Block::new(key, nonce, 1);
+        let block = ChaCha20::new(key, nonce, 1);
         Self {
             block,
             leftover: None,
@@ -95,7 +95,7 @@ impl StreamCipher {
             .increment_counter(buf.chunks(BLOCK_SIZE).count() as u32);
     }
 
-    pub fn block(&self) -> &Block {
+    pub fn block(&self) -> &ChaCha20 {
         &self.block
     }
 }
@@ -127,9 +127,9 @@ fn hchacha20(key: [u8; KEY_BYTES], nonce: [u8; 16]) -> [u8; KEY_BYTES] {
     let counter: [u8; size_of::<u32>()] = nonce[..size_of::<u32>()].try_into().unwrap();
     let counter = u32::from_le_bytes(counter);
     let nonce: [u8; 12] = nonce[size_of::<u32>()..].try_into().unwrap();
-    let block = Block::new(key, nonce, counter);
+    let block = ChaCha20::new(key, nonce, counter);
     let mut state = block.next_nth_state(0);
-    state.inner_block();
+    state.inner_block_10_rounds();
 
     let mut out = [0; KEY_BYTES];
     let mut out_pos = 0;
@@ -166,13 +166,13 @@ fn test_h_cha_cha_20() {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Block {
+pub struct ChaCha20 {
     constant: [u32; 4],
     nonce: [u32; 3],
     key: [u32; 8],
     counter: u32,
 }
-impl Block {
+impl ChaCha20 {
     pub fn new(key: [u8; KEY_BYTES], nonce: [u8; NONCE_BYTES], counter: u32) -> Self {
         let constant = [
             u32::from_le_bytes(CONSTANT[0..4].try_into().unwrap()),
@@ -222,7 +222,7 @@ impl Block {
         let mut state = self.next_nth_state(n);
         let mut working_state = state;
 
-        working_state.inner_block();
+        working_state.inner_block_10_rounds();
 
         state.add(working_state.vec());
 
@@ -292,17 +292,20 @@ impl State {
             .for_each(|(a, b)| *a = a.wrapping_add(*b));
     }
 
-    pub fn inner_block(&mut self) {
+    pub fn inner_block_10_rounds(&mut self) {
         for _ in 0..10 {
-            self.quarter_round(0, 4, 8, 12);
-            self.quarter_round(1, 5, 9, 13);
-            self.quarter_round(2, 6, 10, 14);
-            self.quarter_round(3, 7, 11, 15);
-            self.quarter_round(0, 5, 10, 15);
-            self.quarter_round(1, 6, 11, 12);
-            self.quarter_round(2, 7, 8, 13);
-            self.quarter_round(3, 4, 9, 14);
+            self.inner_block();
         }
+    }
+    pub fn inner_block(&mut self) {
+        self.quarter_round(0, 4, 8, 12);
+        self.quarter_round(1, 5, 9, 13);
+        self.quarter_round(2, 6, 10, 14);
+        self.quarter_round(3, 7, 11, 15);
+        self.quarter_round(0, 5, 10, 15);
+        self.quarter_round(1, 6, 11, 12);
+        self.quarter_round(2, 7, 8, 13);
+        self.quarter_round(3, 4, 9, 14);
     }
 }
 
@@ -373,7 +376,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x4a, 0x00, 0x00, 0x00, 0x00,
         ];
         let counter = 1;
-        let block = Block::new(key, nonce, counter);
+        let block = ChaCha20::new(key, nonce, counter);
         let mut state = block.next_nth_state(0);
         assert_eq!(
             state.vec(),
@@ -385,7 +388,7 @@ mod tests {
             ]
         );
 
-        state.inner_block();
+        state.inner_block_10_rounds();
         assert_eq!(
             state.vec(),
             &[
