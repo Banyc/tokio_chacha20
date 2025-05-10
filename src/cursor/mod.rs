@@ -59,7 +59,10 @@ impl NonceCursor {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::tests::create_random_config;
+    use crate::{
+        config::tests::create_random_config,
+        cursor::{decrypt::DecryptResult, encrypt::EncryptResult},
+    };
 
     use super::*;
 
@@ -73,12 +76,24 @@ mod tests {
         let mut buf = [0; 1024];
 
         for _ in 0..1024 {
-            let (_, n) = en.encrypt(msg, &mut buf);
-            let i = de.decrypt(&mut buf[..n]).unwrap();
-            assert_eq!(&buf[i..n], &msg[..]);
+            let EncryptResult { read, written } = en.encrypt(msg, &mut buf);
+            assert_eq!(read, msg.len());
+            let encrypted_buf = &mut buf[..written];
+            let decrypted_start = match de.decrypt(encrypted_buf) {
+                DecryptResult::StillAtNonce => panic!(),
+                DecryptResult::WithUserData { user_data_start } => user_data_start,
+            };
+            let decypted_buf = &encrypted_buf[decrypted_start..];
+            assert_eq!(decypted_buf, &msg[..]);
 
-            let n = en.encrypt(msg, &mut []);
-            assert_eq!(n, (0, 0));
+            let res = en.encrypt(msg, &mut []);
+            assert_eq!(
+                res,
+                EncryptResult {
+                    read: 0,
+                    written: 0
+                }
+            );
         }
     }
 }

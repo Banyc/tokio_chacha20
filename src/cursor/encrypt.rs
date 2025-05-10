@@ -17,29 +17,36 @@ impl EncryptCursor {
     }
 
     /// Return the amount of bytes read from `from` and the amount of bytes written to `to`
-    pub fn encrypt(&mut self, from: &[u8], to: &mut [u8]) -> (usize, usize) {
-        let mut to_amt = 0;
+    pub fn encrypt(&mut self, from: &[u8], to: &mut [u8]) -> EncryptResult {
+        let mut to_pos = 0;
 
         // Loop for state transitions from `Nonce` to `UserData`
         loop {
             match self.state.take().unwrap() {
                 ReadCursorState::Nonce(c) => {
-                    let n = c.remaining_nonce().len().min(to.len());
-                    to[..n].copy_from_slice(&c.remaining_nonce()[..n]);
-                    self.state = Some(c.consume_nonce(n));
-                    to_amt += n;
-                    if n == to.len() {
-                        return (0, to_amt);
+                    let copy_n = c.remaining_nonce().len().min(to.len());
+                    to[..copy_n].copy_from_slice(&c.remaining_nonce()[..copy_n]);
+                    self.state = Some(c.consume_nonce(copy_n));
+                    to_pos += copy_n;
+                    let ran_out_write_buf = copy_n == to.len();
+                    if ran_out_write_buf {
+                        break EncryptResult {
+                            read: 0,
+                            written: to_pos,
+                        };
                     }
                 }
                 ReadCursorState::UserData(mut c) => {
-                    let to = &mut to[to_amt..];
-                    let n = from.len().min(to.len());
-                    to[..n].copy_from_slice(&from[..n]);
-                    to_amt += n;
-                    c.xor(&mut to[..n]);
+                    let to = &mut to[to_pos..];
+                    let copy_n = from.len().min(to.len());
+                    to[..copy_n].copy_from_slice(&from[..copy_n]);
+                    to_pos += copy_n;
+                    c.xor(&mut to[..copy_n]);
                     self.state = Some(ReadCursorState::UserData(c));
-                    return (n, to_amt);
+                    break EncryptResult {
+                        read: copy_n,
+                        written: to_pos,
+                    };
                 }
             }
         }
@@ -63,4 +70,10 @@ impl EncryptCursor {
         };
         poly1305_key_gen(key, map_nonce(nonce))
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EncryptResult {
+    pub read: usize,
+    pub written: usize,
 }

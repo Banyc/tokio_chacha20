@@ -19,25 +19,29 @@ impl DecryptCursor {
     }
 
     /// Return the start index of the decrypted user data
-    pub fn decrypt(&mut self, buf: &mut [u8]) -> Option<usize> {
+    pub fn decrypt(&mut self, buf: &mut [u8]) -> DecryptResult {
         let mut pos = 0;
 
         // Loop for state transitions from `Nonce` to `UserData`
         loop {
             match self.state.take().unwrap() {
                 WriteCursorState::Nonce(c) => {
-                    let mut rdr: io::Cursor<&[u8]> = io::Cursor::new(buf);
+                    let read_buf = &buf[..];
+                    let mut rdr: io::Cursor<&[u8]> = io::Cursor::new(read_buf);
                     let c = c.collect_nonce_from(&mut rdr);
                     self.state = Some(c);
                     pos = rdr.position() as usize;
-                    if pos == rdr.get_ref().len() {
-                        return None;
+                    let ran_out_of_read_buf = pos == read_buf.len();
+                    if ran_out_of_read_buf {
+                        return DecryptResult::StillAtNonce;
                     }
                 }
                 WriteCursorState::UserData(mut c) => {
                     c.xor(&mut buf[pos..]);
                     self.state = Some(WriteCursorState::UserData(c));
-                    return Some(pos);
+                    return DecryptResult::WithUserData {
+                        user_data_start: pos,
+                    };
                 }
             }
         }
@@ -65,4 +69,10 @@ impl DecryptCursor {
         let nonce = c.cipher().block().nonce();
         Some(poly1305_key_gen(key, map_nonce(nonce)))
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecryptResult {
+    StillAtNonce,
+    WithUserData { user_data_start: usize },
 }

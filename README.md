@@ -21,7 +21,7 @@ client.write_all(data).await.unwrap();
 server.read_exact(&mut buf[..data.len()]).await.unwrap();
 ```
 
-Sync:
+Polling:
 
 ```rust
 let config = create_random_config();
@@ -31,8 +31,13 @@ let mut en = EncryptCursor::new(*config.key());
 let mut de = DecryptCursor::new(*config.key());
 let mut buf = [0; 1024];
 
-let (_, n) = en.encrypt(msg, &mut buf).unwrap();
-let i = de.decrypt(&mut buf[..n]).unwrap();
-let i = i.unwrap();
-assert_eq!(&buf[i..n], &msg[..]);
+let EncryptResult { read, written } = en.encrypt(msg, &mut buf);
+assert_eq!(read, msg.len());
+let encrypted_buf = &mut buf[..written];
+let decrypted_start = match de.decrypt(encrypted_buf) {
+    DecryptResult::StillAtNonce => panic!(),
+    DecryptResult::WithUserData { user_data_start } => user_data_start,
+};
+let decypted_buf = &encrypted_buf[decrypted_start..];
+assert_eq!(decypted_buf, &msg[..]);
 ```
