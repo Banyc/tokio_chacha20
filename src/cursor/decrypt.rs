@@ -20,30 +20,29 @@ impl DecryptCursor {
 
     /// Return the start index of the decrypted user data
     pub fn decrypt(&mut self, buf: &mut [u8]) -> DecryptResult {
-        let mut pos = 0;
-
-        // Loop for state transitions from `Nonce` to `UserData`
-        loop {
-            match self.state.take().unwrap() {
-                WriteCursorState::Nonce(c) => {
-                    let read_buf = &buf[..];
-                    let mut rdr: io::Cursor<&[u8]> = io::Cursor::new(read_buf);
-                    let c = c.collect_nonce_from(&mut rdr);
-                    self.state = Some(c);
-                    pos = rdr.position() as usize;
-                    let ran_out_of_read_buf = pos == read_buf.len();
-                    if ran_out_of_read_buf {
-                        return DecryptResult::StillAtNonce;
-                    }
-                }
-                WriteCursorState::UserData(mut c) => {
-                    c.xor(&mut buf[pos..]);
-                    self.state = Some(WriteCursorState::UserData(c));
-                    return DecryptResult::WithUserData {
-                        user_data_start: pos,
-                    };
-                }
+        let pos = if matches!(self.state.as_ref().unwrap(), WriteCursorState::Nonce(_)) {
+            let c = match self.state.take().unwrap() {
+                WriteCursorState::Nonce(c) => c,
+                _ => unreachable!(),
+            };
+            let read_buf = &buf[..];
+            let mut rdr: io::Cursor<&[u8]> = io::Cursor::new(read_buf);
+            self.state = Some(c.collect_nonce_from(&mut rdr));
+            let pos = rdr.position() as usize;
+            let ran_out_of_read_buf = pos == read_buf.len();
+            if ran_out_of_read_buf {
+                return DecryptResult::StillAtNonce;
             }
+            pos
+        } else {
+            0
+        };
+        let WriteCursorState::UserData(c) = self.state.as_mut().unwrap() else {
+            panic!();
+        };
+        c.xor(&mut buf[pos..]);
+        DecryptResult::WithUserData {
+            user_data_start: pos,
         }
     }
 

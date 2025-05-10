@@ -18,37 +18,35 @@ impl EncryptCursor {
 
     /// Return the amount of bytes read from `from` and the amount of bytes written to `to`
     pub fn encrypt(&mut self, from: &[u8], to: &mut [u8]) -> EncryptResult {
-        let mut to_pos = 0;
-
-        // Loop for state transitions from `Nonce` to `UserData`
-        loop {
-            match self.state.take().unwrap() {
-                ReadCursorState::Nonce(c) => {
-                    let copy_n = c.remaining_nonce().len().min(to.len());
-                    to[..copy_n].copy_from_slice(&c.remaining_nonce()[..copy_n]);
-                    self.state = Some(c.consume_nonce(copy_n));
-                    to_pos += copy_n;
-                    let ran_out_write_buf = copy_n == to.len();
-                    if ran_out_write_buf {
-                        break EncryptResult {
-                            read: 0,
-                            written: to_pos,
-                        };
-                    }
-                }
-                ReadCursorState::UserData(mut c) => {
-                    let to = &mut to[to_pos..];
-                    let copy_n = from.len().min(to.len());
-                    to[..copy_n].copy_from_slice(&from[..copy_n]);
-                    to_pos += copy_n;
-                    c.xor(&mut to[..copy_n]);
-                    self.state = Some(ReadCursorState::UserData(c));
-                    break EncryptResult {
-                        read: copy_n,
-                        written: to_pos,
-                    };
-                }
+        let mut to_pos = if matches!(self.state.as_ref().unwrap(), ReadCursorState::Nonce(_)) {
+            let ReadCursorState::Nonce(c) = self.state.take().unwrap() else {
+                unreachable!();
+            };
+            let copy_n = c.remaining_nonce().len().min(to.len());
+            to[..copy_n].copy_from_slice(&c.remaining_nonce()[..copy_n]);
+            self.state = Some(c.consume_nonce(copy_n));
+            let ran_out_write_buf = copy_n == to.len();
+            if ran_out_write_buf {
+                return EncryptResult {
+                    read: 0,
+                    written: copy_n,
+                };
             }
+            copy_n
+        } else {
+            0
+        };
+        let ReadCursorState::UserData(c) = self.state.as_mut().unwrap() else {
+            panic!();
+        };
+        let to = &mut to[to_pos..];
+        let copy_n = from.len().min(to.len());
+        to[..copy_n].copy_from_slice(&from[..copy_n]);
+        to_pos += copy_n;
+        c.xor(&mut to[..copy_n]);
+        EncryptResult {
+            read: copy_n,
+            written: to_pos,
         }
     }
 
