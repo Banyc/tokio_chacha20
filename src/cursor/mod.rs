@@ -7,9 +7,9 @@ pub use nonce_write::{NonceWriteCursor, WriteCursorState};
 mod user_data;
 pub use user_data::UserDataCursor;
 mod decrypt;
-pub use decrypt::DecryptCursor;
+pub use decrypt::{DecryptCursor, DecryptResult};
 mod encrypt;
-pub use encrypt::EncryptCursor;
+pub use encrypt::{EncryptCursor, EncryptResult};
 
 use crate::{cipher::chacha20_nonce_from_xnonce, NONCE_BYTES, X_NONCE_BYTES};
 
