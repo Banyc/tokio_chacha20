@@ -2,10 +2,10 @@ use crate::{mac::poly1305_key_gen, KEY_BYTES, NONCE_BYTES};
 
 use super::{NonceReadCursor, ReadCursorState};
 
+#[derive(Debug, Clone)]
 pub struct EncryptCursor {
     state: Option<ReadCursorState>,
 }
-
 impl EncryptCursor {
     pub fn new(key: [u8; KEY_BYTES]) -> Self {
         let state = Some(ReadCursorState::Nonce(NonceReadCursor::new(key)));
@@ -53,7 +53,6 @@ impl EncryptCursor {
     pub fn poly1305_key(&self) -> [u8; KEY_BYTES] {
         self.poly1305_key_map_nonce(|x| x)
     }
-
     pub fn poly1305_key_map_nonce(
         &self,
         map_nonce: impl Fn([u8; NONCE_BYTES]) -> [u8; NONCE_BYTES],

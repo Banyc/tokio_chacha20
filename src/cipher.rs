@@ -33,7 +33,6 @@ impl StreamCipher {
         };
         self.encrypt_(buf, par)
     }
-
     fn encrypt_(&mut self, buf: &mut [u8], par: ParOrNot) {
         let mut pos = 0;
 

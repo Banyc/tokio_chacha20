@@ -38,9 +38,10 @@ impl<R: AsyncRead + Unpin> AsyncRead for ReadHalf<R> {
                     assert!(c.remaining_nonce_size() > 0);
 
                     // let mut buf = vec![0; self.remaining_nonce_size()];
-                    let mut buf = ArrayVec::<u8, 12>::from_iter(
-                        std::iter::repeat(0).take(c.remaining_nonce_size()),
-                    );
+                    let mut buf = ArrayVec::<u8, 12>::from_iter(std::iter::repeat_n(
+                        0,
+                        c.remaining_nonce_size(),
+                    ));
                     let mut buf = ReadBuf::new(&mut buf);
 
                     // Collect nonce from `r`

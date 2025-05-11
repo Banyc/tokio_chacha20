@@ -4,10 +4,10 @@ use crate::{mac::poly1305_key_gen, KEY_BYTES, NONCE_BYTES};
 
 use super::{NonceWriteCursor, WriteCursorState};
 
+#[derive(Debug, Clone)]
 pub struct DecryptCursor {
     state: Option<WriteCursorState>,
 }
-
 impl DecryptCursor {
     pub fn new(key: [u8; KEY_BYTES]) -> Self {
         let state = Some(WriteCursorState::Nonce(NonceWriteCursor::new(key)));
@@ -56,7 +56,6 @@ impl DecryptCursor {
     pub fn poly1305_key(&self) -> Option<[u8; KEY_BYTES]> {
         self.poly1305_key_map_nonce(|x| x)
     }
-
     pub fn poly1305_key_map_nonce(
         &self,
         map_nonce: impl Fn([u8; NONCE_BYTES]) -> [u8; NONCE_BYTES],
