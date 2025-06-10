@@ -51,8 +51,8 @@ pub fn poly1305_mac(key: [u8; KEY_BYTES], msg: &[u8]) -> [u8; BLOCK_BYTES] {
 
 /// Generate a one-time key for `poly1305_mac`
 pub fn poly1305_key_gen_8_byte_nonce(key: [u8; KEY_BYTES], nonce: [u8; 8]) -> [u8; KEY_BYTES] {
-    let mut nonce: ArrayVec<u8, 12> = nonce.as_slice().try_into().unwrap();
-    nonce.extend(std::iter::repeat_n(0, 12 - 8));
+    let mut nonce: ArrayVec<u8, NONCE_BYTES> = nonce.as_slice().try_into().unwrap();
+    nonce.extend(std::iter::repeat_n(0, NONCE_BYTES - 8));
     poly1305_key_gen(key, nonce.as_slice().try_into().unwrap())
 }
 /// Generate a one-time key for `poly1305_mac`

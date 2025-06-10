@@ -125,14 +125,14 @@ pub(crate) fn chacha20_nonce_from_xnonce(nonce: [u8; X_NONCE_BYTES]) -> [u8; NON
 fn hchacha20(key: [u8; KEY_BYTES], nonce: [u8; 16]) -> [u8; KEY_BYTES] {
     let counter: [u8; size_of::<u32>()] = nonce[..size_of::<u32>()].try_into().unwrap();
     let counter = u32::from_le_bytes(counter);
-    let nonce: [u8; 12] = nonce[size_of::<u32>()..].try_into().unwrap();
+    let nonce: [u8; NONCE_BYTES] = nonce[size_of::<u32>()..].try_into().unwrap();
     let block = ChaCha20::new(key, nonce, counter);
     let mut state = block.next_nth_state(0);
     state.inner_block_10_rounds();
 
     let mut out = [0; KEY_BYTES];
     let mut out_pos = 0;
-    for offset in [0, 12] {
+    for offset in [0, NONCE_BYTES] {
         for i in 0..4 {
             let bytes = state.vec()[i + offset].to_le_bytes();
             out[out_pos..out_pos + size_of::<u32>()].copy_from_slice(&bytes);
@@ -233,12 +233,13 @@ impl ChaCha20 {
     }
 
     pub fn nonce(&self) -> [u8; NONCE_BYTES] {
-        let nonce: ArrayVec<u8, 12> = self.nonce.iter().flat_map(|n| n.to_le_bytes()).collect();
+        let nonce: ArrayVec<u8, NONCE_BYTES> =
+            self.nonce.iter().flat_map(|n| n.to_le_bytes()).collect();
         nonce.as_slice().try_into().unwrap()
     }
 
     pub fn key(&self) -> [u8; KEY_BYTES] {
-        let key: ArrayVec<u8, 32> = self.key.iter().flat_map(|n| n.to_le_bytes()).collect();
+        let key: ArrayVec<u8, KEY_BYTES> = self.key.iter().flat_map(|n| n.to_le_bytes()).collect();
         key.as_slice().try_into().unwrap()
     }
 }

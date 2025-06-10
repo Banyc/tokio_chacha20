@@ -5,7 +5,7 @@ use tokio::io::{AsyncRead, ReadBuf};
 
 use crate::{
     cursor::{NonceWriteCursor, WriteCursorState},
-    KEY_BYTES,
+    KEY_BYTES, X_NONCE_BYTES,
 };
 
 #[derive(Debug)]
@@ -38,7 +38,7 @@ impl<R: AsyncRead + Unpin> AsyncRead for ReadHalf<R> {
                     assert!(c.remaining_nonce_size() > 0);
 
                     // let mut buf = vec![0; self.remaining_nonce_size()];
-                    let mut buf = ArrayVec::<u8, 12>::from_iter(std::iter::repeat_n(
+                    let mut buf = ArrayVec::<u8, X_NONCE_BYTES>::from_iter(std::iter::repeat_n(
                         0,
                         c.remaining_nonce_size(),
                     ));

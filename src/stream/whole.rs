@@ -15,10 +15,14 @@ impl<R, W> WholeStream<R, W> {
     pub fn new(r: ReadHalf<R>, w: WriteHalf<W>) -> Self {
         Self { r, w }
     }
-
     pub fn from_key_halves(key: [u8; KEY_BYTES], r: R, w: W) -> Self {
         let r = ReadHalf::new(key, r);
         let w = WriteHalf::new(key, w);
+        Self { r, w }
+    }
+    pub fn from_key_halves_x(key: [u8; KEY_BYTES], r: R, w: W) -> Self {
+        let r = ReadHalf::new_x(key, r);
+        let w = WriteHalf::new_x(key, w);
         Self { r, w }
     }
 }
