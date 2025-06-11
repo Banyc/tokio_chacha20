@@ -12,6 +12,67 @@ use crate::{
 };
 
 #[derive(Debug)]
+pub struct Chacha20Writer<W> {
+    cipher: StreamCipher,
+    w: W,
+    buf: Option<Vec<u8>>,
+}
+impl<W> Chacha20Writer<W> {
+    pub fn new_x_with_nonce(cipher: StreamCipher, w: W) -> Self {
+        let buf = Some(vec![]);
+        Self { cipher, w, buf }
+    }
+}
+impl<W: AsyncWrite + Unpin> AsyncWrite for Chacha20Writer<W> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, std::io::Error>> {
+        loop {
+            // Reuse the inner buffer
+            let mut inner_buf = self.buf.take().unwrap();
+
+            // Fill the inner buffer with encrypted data if it's empty
+            if inner_buf.is_empty() {
+                inner_buf.extend(buf);
+                self.cipher.encrypt(&mut inner_buf);
+            }
+
+            // Try to write `w` with the inner buffer
+            let ready = Pin::new(&mut self.w).poll_write(cx, &inner_buf);
+
+            // Remove the consumed data from the inner buffer
+            if let Poll::Ready(Ok(amt)) = ready {
+                inner_buf.drain(0..amt);
+            }
+
+            // Return the inner buffer
+            self.buf = Some(inner_buf);
+
+            let _ = ready!(ready)?;
+
+            // Do not allow caller to switch buffers until the inner buffer is fully consumed
+            if self.buf.as_ref().unwrap().is_empty() {
+                return Ok(buf.len()).into();
+            }
+        }
+    }
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        Pin::new(&mut self.w).poll_flush(cx)
+    }
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        Pin::new(&mut self.w).poll_shutdown(cx)
+    }
+}
+
+#[derive(Debug)]
 pub struct WriteHalf<W> {
     cursor: Option<ReadCursorState>,
     w: W,

@@ -10,6 +10,32 @@ use crate::{
 };
 
 #[derive(Debug)]
+pub struct Chacha20Reader<R> {
+    cipher: StreamCipher,
+    r: R,
+}
+impl<R> Chacha20Reader<R> {
+    pub fn new(cipher: StreamCipher, r: R) -> Self {
+        Self { cipher, r }
+    }
+}
+impl<R: AsyncRead + Unpin> AsyncRead for Chacha20Reader<R> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        // Read data from the `r`
+        let ready = Pin::new(&mut self.r).poll_read(cx, buf);
+
+        // Decrypt the read user data in place
+        self.cipher.encrypt(buf.filled_mut());
+
+        ready
+    }
+}
+
+#[derive(Debug)]
 pub struct ReadHalf<R> {
     cursor: Option<WriteCursorState>,
     r: R,

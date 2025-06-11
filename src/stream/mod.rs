@@ -1,9 +1,77 @@
 mod read;
-pub use read::ReadHalf;
+use std::{
+    io,
+    pin::Pin,
+    task::{ready, Context, Poll},
+};
+
+pub use read::{Chacha20Reader, ReadHalf};
 mod whole;
-pub use whole::WholeStream;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+pub use whole::{DuplexStream, WholeStream};
 mod write;
-pub use write::WriteHalf;
+pub use write::{Chacha20Writer, WriteHalf};
+
+use crate::{mac::Poly1305Hasher, KEY_BYTES};
+
+#[derive(Debug)]
+pub struct Poly1305Reader;
+#[derive(Debug)]
+pub struct Poly1305Writer;
+#[derive(Debug)]
+pub struct Poly1305Stream<S, Rw> {
+    hasher: Poly1305Hasher,
+    stream: S,
+    _rw: Rw,
+}
+impl<S, Rw> Poly1305Stream<S, Rw> {
+    pub fn new(one_time_key: [u8; KEY_BYTES], stream: S, rw: Rw) -> Self {
+        let hasher = Poly1305Hasher::new(&one_time_key);
+        Self {
+            hasher,
+            stream,
+            _rw: rw,
+        }
+    }
+}
+impl<S> AsyncRead for Poly1305Stream<S, Poly1305Reader>
+where
+    S: AsyncRead + Unpin,
+{
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let start = buf.filled().len();
+        ready!(Pin::new(&mut self.stream).poll_read(cx, buf))?;
+        self.hasher.update(&buf.filled()[start..]);
+        Ok(()).into()
+    }
+}
+impl<S> AsyncWrite for Poly1305Stream<S, Poly1305Writer>
+where
+    S: AsyncWrite + Unpin,
+{
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        let n = ready!(Pin::new(&mut self.stream).poll_write(cx, buf))?;
+        self.hasher.update(&buf[..n]);
+        Ok(n).into()
+    }
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        Pin::new(&mut self.stream).poll_flush(cx)
+    }
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), io::Error>> {
+        Pin::new(&mut self.stream).poll_shutdown(cx)
+    }
+}
 
 #[cfg(test)]
 mod tests {
