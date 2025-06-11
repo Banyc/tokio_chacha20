@@ -4,7 +4,8 @@ use arrayvec::ArrayVec;
 use tokio::io::{AsyncRead, ReadBuf};
 
 use crate::{
-    cursor::{NonceWriteCursor, WriteCursorState},
+    cipher::StreamCipher,
+    cursor::{NonceWriteCursor, UserDataCursor, WriteCursorState},
     KEY_BYTES, X_NONCE_BYTES,
 };
 
@@ -22,6 +23,13 @@ impl<R> ReadHalf<R> {
     pub fn new_x(key: [u8; KEY_BYTES], r: R) -> Self {
         let cursor = NonceWriteCursor::new_x(key);
         let cursor = Some(WriteCursorState::Nonce(cursor));
+        Self { cursor, r }
+    }
+    /// Do not read nonce from `r`
+    pub fn new_x_with_nonce(key: [u8; KEY_BYTES], nonce: [u8; X_NONCE_BYTES], r: R) -> Self {
+        let cipher = StreamCipher::new_x(key, nonce);
+        let cursor = UserDataCursor::new(cipher);
+        let cursor = Some(WriteCursorState::UserData(cursor));
         Self { cursor, r }
     }
 }

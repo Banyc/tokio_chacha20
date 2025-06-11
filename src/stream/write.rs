@@ -6,8 +6,9 @@ use std::{
 use tokio::io::AsyncWrite;
 
 use crate::{
-    cursor::{NonceReadCursor, ReadCursorState},
-    KEY_BYTES,
+    cipher::StreamCipher,
+    cursor::{NonceReadCursor, ReadCursorState, UserDataCursor},
+    KEY_BYTES, X_NONCE_BYTES,
 };
 
 #[derive(Debug)]
@@ -26,6 +27,14 @@ impl<W> WriteHalf<W> {
     pub fn new_x(key: [u8; KEY_BYTES], w: W) -> Self {
         let cursor = NonceReadCursor::new_x(key);
         let cursor = Some(ReadCursorState::Nonce(cursor));
+        let buf = Some(vec![]);
+        Self { cursor, w, buf }
+    }
+    /// Do not write nonce to the stream `w`
+    pub fn new_x_with_nonce(key: [u8; KEY_BYTES], nonce: [u8; X_NONCE_BYTES], w: W) -> Self {
+        let cipher = StreamCipher::new_x(key, nonce);
+        let cursor = UserDataCursor::new(cipher);
+        let cursor = Some(ReadCursorState::UserData(cursor));
         let buf = Some(vec![]);
         Self { cursor, w, buf }
     }

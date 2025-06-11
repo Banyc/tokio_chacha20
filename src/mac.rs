@@ -21,32 +21,87 @@ fn s(key: &[u8; KEY_BYTES]) -> [u8; BLOCK_BYTES] {
     key[BLOCK_BYTES..].try_into().unwrap()
 }
 
-/// `key`: Should be a one-time key generated from `poly1305_key_gen`
-pub fn poly1305_mac(key: [u8; KEY_BYTES], msg: &[u8]) -> [u8; BLOCK_BYTES] {
-    let mut r: [u8; BLOCK_BYTES] = r(&key);
-    let s: [u8; BLOCK_BYTES] = s(&key);
+#[derive(Debug)]
+pub struct Poly1305Hasher {
+    c: Poly1305Const,
+    block: Vec<u8>,
+    cum: BigUint,
+}
+impl Poly1305Hasher {
+    /// `key`: Should be a one-time key generated from `poly1305_key_gen`
+    pub fn new(key: &[u8; KEY_BYTES]) -> Self {
+        let c = calc_const(key);
+        let cum = BigUint::new(vec![0]);
+        let n = vec![];
+        Self { c, block: n, cum }
+    }
+    pub fn update(&mut self, msg: &[u8]) {
+        let mut pos = 0;
+        loop {
+            let msg = &msg[pos..];
+            let msg_unfilled = BLOCK_BYTES - self.block.len();
+            let n = msg.len().min(msg_unfilled);
+            pos += n;
+            self.block.extend(&msg[..n]);
+
+            if self.block.len() != BLOCK_BYTES {
+                break;
+            }
+            self.cum = calc_cum(&self.c, &self.cum, &self.block);
+            self.block.clear();
+        }
+        assert_eq!(pos, msg.len());
+    }
+    pub fn finalize(&self) -> [u8; BLOCK_BYTES] {
+        let cum = if self.block.is_empty() {
+            self.cum.clone()
+        } else {
+            calc_cum(&self.c, &self.cum, &self.block)
+        };
+        calc_mac(&self.c, &cum)
+    }
+}
+#[derive(Debug)]
+struct Poly1305Const {
+    pub r: BigUint,
+    pub s: BigUint,
+    pub p: BigUint,
+}
+fn calc_const(key: &[u8; KEY_BYTES]) -> Poly1305Const {
+    let mut r: [u8; BLOCK_BYTES] = r(key);
+    let s: [u8; BLOCK_BYTES] = s(key);
     clamp_r(&mut r);
-    let mut cum = BigUint::new(vec![0]);
-
-    let r = BigUint::from_bytes_le(&r);
-    let s = BigUint::from_bytes_le(&s);
-    let p = BigUint::new(vec![2]).pow(130) - BigUint::new(vec![5]);
-
-    const BLOCK_BYTES_PLUS_1: usize = BLOCK_BYTES + 1;
-    msg.chunks(BLOCK_BYTES).for_each(|c| {
-        let mut n: ArrayVec<u8, BLOCK_BYTES_PLUS_1> = c.try_into().unwrap();
-        n.push(0x1);
-        let n = BigUint::from_bytes_le(&n);
-        cum += n;
-        cum = (&r * &cum) % &p;
-    });
-    cum += &s;
-
+    Poly1305Const {
+        r: BigUint::from_bytes_le(&r),
+        s: BigUint::from_bytes_le(&s),
+        p: BigUint::new(vec![2]).pow(130) - BigUint::new(vec![5]),
+    }
+}
+fn calc_cum(c: &Poly1305Const, cum: &BigUint, block: &[u8]) -> BigUint {
+    let mut n: ArrayVec<u8, { BLOCK_BYTES + 1 }> = block.try_into().unwrap();
+    n.push(0x1);
+    let n = BigUint::from_bytes_le(&n);
+    let cum = cum + n;
+    (&c.r * &cum) % &c.p
+}
+fn calc_mac(c: &Poly1305Const, cum: &BigUint) -> [u8; BLOCK_BYTES] {
+    let cum = cum + &c.s;
     let mut cum = cum.to_bytes_le();
     cum.truncate(16);
     let n = 16 - cum.len();
     cum.extend(std::iter::repeat_n(0, n));
     cum.try_into().unwrap()
+}
+
+/// `key`: Should be a one-time key generated from `poly1305_key_gen`
+pub fn poly1305_mac(key: [u8; KEY_BYTES], msg: &[u8]) -> [u8; BLOCK_BYTES] {
+    let c = calc_const(&key);
+    let mut cum = BigUint::new(vec![0]);
+
+    msg.chunks(BLOCK_BYTES).for_each(|block| {
+        cum = calc_cum(&c, &cum, block);
+    });
+    calc_mac(&c, &cum)
 }
 
 /// Generate a one-time key for `poly1305_mac`
@@ -100,14 +155,16 @@ mod tests {
         assert_eq!(r, clamped_r);
 
         let msg = b"Cryptographic Forum Research Group";
+        let expected_mac = [
+            0xa8, 0x06, 0x1d, 0xc1, 0x30, 0x51, 0x36, 0xc6, 0xc2, 0x2b, 0x8b, 0xaf, 0x0c, 0x01,
+            0x27, 0xa9,
+        ];
         let tag = poly1305_mac(key, msg);
-        assert_eq!(
-            tag,
-            [
-                0xa8, 0x06, 0x1d, 0xc1, 0x30, 0x51, 0x36, 0xc6, 0xc2, 0x2b, 0x8b, 0xaf, 0x0c, 0x01,
-                0x27, 0xa9,
-            ]
-        );
+        assert_eq!(tag, expected_mac);
+        let mut hasher = Poly1305Hasher::new(&key);
+        hasher.update(msg);
+        let tag = hasher.finalize();
+        assert_eq!(tag, expected_mac);
     }
 
     #[test]
