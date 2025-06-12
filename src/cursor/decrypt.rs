@@ -40,7 +40,7 @@ impl DecryptCursor {
         let WriteCursorState::UserData(c) = self.state.as_mut().unwrap() else {
             panic!();
         };
-        c.xor(&mut buf[pos..]);
+        c.encrypt(&mut buf[pos..]);
         DecryptResult::WithUserData {
             user_data_start: pos,
         }
@@ -63,8 +63,8 @@ impl DecryptCursor {
         let WriteCursorState::UserData(c) = self.state.as_ref().unwrap() else {
             return None;
         };
-        let key = c.cipher().block().key();
-        let nonce = c.cipher().block().nonce();
+        let key = c.block().key();
+        let nonce = c.block().nonce();
         Some(poly1305_key_gen(key, map_nonce(nonce)))
     }
 }

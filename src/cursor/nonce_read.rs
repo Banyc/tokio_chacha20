@@ -4,7 +4,7 @@ use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use crate::{cipher::StreamCipher, KEY_BYTES, NONCE_BYTES, X_NONCE_BYTES};
 
-use super::{user_data::UserDataCursor, NonceCursor};
+use super::NonceCursor;
 
 #[derive(Debug, Clone)]
 pub struct NonceReadCursor {
@@ -43,20 +43,19 @@ impl NonceReadCursor {
             NonceCursor::Nonce(cursor) => StreamCipher::new(self.key, cursor.into_inner()),
             NonceCursor::XNonce(cursor) => StreamCipher::new_x(self.key, cursor.into_inner()),
         };
-        let cursor = UserDataCursor::new(cipher);
-        ReadCursorState::UserData(cursor)
+        ReadCursorState::UserData(cipher)
     }
 
     pub async fn encode_nonce_to<W: AsyncWrite + Unpin>(
         self,
         w: &mut W,
-    ) -> io::Result<UserDataCursor> {
+    ) -> io::Result<StreamCipher> {
         AsyncWriteExt::write_all(w, self.remaining_nonce()).await?;
         let cipher = match self.nonce {
             NonceCursor::Nonce(cursor) => StreamCipher::new(self.key, cursor.into_inner()),
             NonceCursor::XNonce(cursor) => StreamCipher::new_x(self.key, cursor.into_inner()),
         };
-        Ok(UserDataCursor::new(cipher))
+        Ok(cipher)
     }
 
     pub fn key(&self) -> &[u8; KEY_BYTES] {
@@ -71,5 +70,5 @@ impl NonceReadCursor {
 #[derive(Debug, Clone)]
 pub enum ReadCursorState {
     Nonce(NonceReadCursor),
-    UserData(UserDataCursor),
+    UserData(StreamCipher),
 }

@@ -43,7 +43,7 @@ impl EncryptCursor {
         let copy_n = from.len().min(to.len());
         to[..copy_n].copy_from_slice(&from[..copy_n]);
         to_pos += copy_n;
-        c.xor(&mut to[..copy_n]);
+        c.encrypt(&mut to[..copy_n]);
         EncryptResult {
             read: copy_n,
             written: to_pos,
@@ -59,11 +59,11 @@ impl EncryptCursor {
     ) -> [u8; KEY_BYTES] {
         let key = match self.state.as_ref().unwrap() {
             ReadCursorState::Nonce(c) => *c.key(),
-            ReadCursorState::UserData(c) => c.cipher().block().key(),
+            ReadCursorState::UserData(c) => c.block().key(),
         };
         let nonce = match self.state.as_ref().unwrap() {
             ReadCursorState::Nonce(c) => c.chacha20_nonce(),
-            ReadCursorState::UserData(c) => c.cipher().block().nonce(),
+            ReadCursorState::UserData(c) => c.block().nonce(),
         };
         poly1305_key_gen(key, map_nonce(nonce))
     }

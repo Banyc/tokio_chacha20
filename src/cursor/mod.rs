@@ -4,8 +4,6 @@ use std::io::{self, BufRead};
 pub use nonce_read::{NonceReadCursor, ReadCursorState};
 mod nonce_write;
 pub use nonce_write::{NonceWriteCursor, WriteCursorState};
-mod user_data;
-pub use user_data::UserDataCursor;
 mod decrypt;
 pub use decrypt::{DecryptCursor, DecryptResult};
 mod encrypt;

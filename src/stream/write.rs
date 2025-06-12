@@ -7,7 +7,7 @@ use tokio::io::AsyncWrite;
 
 use crate::{
     cipher::StreamCipher,
-    cursor::{NonceReadCursor, ReadCursorState, UserDataCursor},
+    cursor::{NonceReadCursor, ReadCursorState},
     KEY_BYTES, X_NONCE_BYTES,
 };
 
@@ -94,8 +94,7 @@ impl<W> WriteHalf<W> {
     /// Do not write nonce to the stream `w`
     pub fn new_x_with_nonce(key: [u8; KEY_BYTES], nonce: [u8; X_NONCE_BYTES], w: W) -> Self {
         let cipher = StreamCipher::new_x(key, nonce);
-        let cursor = UserDataCursor::new(cipher);
-        let cursor = Some(ReadCursorState::UserData(cursor));
+        let cursor = Some(ReadCursorState::UserData(cipher));
         let buf = Some(vec![]);
         Self { cursor, w, buf }
     }
@@ -131,7 +130,7 @@ impl<W: AsyncWrite + Unpin> AsyncWrite for WriteHalf<W> {
                     // Fill the inner buffer with encrypted data if it's empty
                     if inner_buf.is_empty() {
                         inner_buf.extend(buf);
-                        c.xor(&mut inner_buf);
+                        c.encrypt(&mut inner_buf);
                     }
 
                     // Return the cursor

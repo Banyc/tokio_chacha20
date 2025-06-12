@@ -5,7 +5,7 @@ use tokio::io::{AsyncRead, ReadBuf};
 
 use crate::{
     cipher::StreamCipher,
-    cursor::{NonceWriteCursor, UserDataCursor, WriteCursorState},
+    cursor::{NonceWriteCursor, WriteCursorState},
     KEY_BYTES, X_NONCE_BYTES,
 };
 
@@ -54,8 +54,7 @@ impl<R> ReadHalf<R> {
     /// Do not read nonce from `r`
     pub fn new_x_with_nonce(key: [u8; KEY_BYTES], nonce: [u8; X_NONCE_BYTES], r: R) -> Self {
         let cipher = StreamCipher::new_x(key, nonce);
-        let cursor = UserDataCursor::new(cipher);
-        let cursor = Some(WriteCursorState::UserData(cursor));
+        let cursor = Some(WriteCursorState::UserData(cipher));
         Self { cursor, r }
     }
 }
@@ -100,7 +99,7 @@ impl<R: AsyncRead + Unpin> AsyncRead for ReadHalf<R> {
                     let ready = Pin::new(&mut self.r).poll_read(cx, buf);
 
                     // Decrypt the read user data in place
-                    c.xor(buf.filled_mut());
+                    c.encrypt(buf.filled_mut());
 
                     self.cursor = Some(WriteCursorState::UserData(c));
                     return ready;
