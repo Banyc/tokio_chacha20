@@ -21,7 +21,7 @@ fn s(key: &[u8; KEY_BYTES]) -> [u8; BLOCK_BYTES] {
     key[BLOCK_BYTES..].try_into().unwrap()
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Poly1305Hasher {
     c: Poly1305Const,
     block: Vec<u8>,
@@ -61,7 +61,7 @@ impl Poly1305Hasher {
         calc_mac(&self.c, &cum)
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Poly1305Const {
     pub r: BigUint,
     pub s: BigUint,
