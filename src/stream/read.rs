@@ -10,7 +10,7 @@ use tokio::io::{AsyncRead, ReadBuf};
 
 use crate::{
     cipher::StreamCipher,
-    mac::{poly1305_key_gen, Poly1305Hasher, BLOCK_BYTES},
+    mac::{poly1305_key_gen, Poly1305Hasher},
     stream::NonceBuf,
     KEY_BYTES,
 };
@@ -28,6 +28,10 @@ impl<R> ChaCha20Reader<R> {
     pub fn new(config: &ChaCha20ReaderConfig<'_>, r: R) -> Self {
         let chacha20 = ChaCha20ReadState::new(config.state);
         Self { chacha20, r }
+    }
+    pub fn into_inner(self) -> (R, Option<Poly1305Hasher>) {
+        let hasher = self.chacha20.into_hasher();
+        (self.r, hasher)
     }
 }
 impl<R> AsyncRead for ChaCha20Reader<R>
@@ -48,7 +52,7 @@ where
 pub struct ChaCha20ReadStateConfig<'a> {
     pub key: &'a [u8; KEY_BYTES],
     pub nonce: &'a NonceBuf,
-    pub hasher: bool,
+    pub hash: bool,
 }
 #[derive(Debug)]
 pub struct ChaCha20ReadState {
@@ -61,13 +65,16 @@ impl ChaCha20ReadState {
             NonceBuf::Nonce(nonce) => StreamCipher::new(*config.key, **nonce),
             NonceBuf::XNonce(nonce) => StreamCipher::new_x(*config.key, **nonce),
         };
-        let hasher = if config.hasher {
+        let hasher = if config.hash {
             let otk = poly1305_key_gen(cipher.block().key(), cipher.block().nonce());
             Some(Poly1305Hasher::new(&otk))
         } else {
             None
         };
         Self { cipher, hasher }
+    }
+    pub fn into_hasher(self) -> Option<Poly1305Hasher> {
+        self.hasher
     }
     pub fn poll<R>(
         &mut self,
@@ -81,51 +88,48 @@ impl ChaCha20ReadState {
         // Read data from the `r`
         ready!(Pin::new(&mut *r).poll_read(cx, buf))?;
 
-        // Decrypt the read user data in place
-        self.cipher.encrypt(buf.filled_mut());
-
         if let Some(hasher) = self.hasher.as_mut() {
             hasher.update(buf.filled());
         }
+
+        // Decrypt the read user data in place
+        self.cipher.encrypt(buf.filled_mut());
 
         Ok(()).into()
     }
 }
 
 #[derive(Debug)]
-pub struct TagReader<R> {
-    tag: Box<[u8; BLOCK_BYTES]>,
-    read_exact_tag: ReadExactState,
-    completed_tag: bool,
+pub struct ExactReader<R, Buf> {
+    buf: Buf,
+    read_exact: ReadExactState,
     r: R,
 }
-impl<R> TagReader<R> {
-    pub fn new(r: R) -> Self {
-        let tag = Box::new([0; BLOCK_BYTES]);
-        let read_exact_tag = ReadExactState::new();
-        Self {
-            tag,
-            read_exact_tag,
-            completed_tag: false,
-            r,
-        }
+impl<R, Buf> ExactReader<R, Buf>
+where
+    Buf: AsRef<[u8]>,
+{
+    pub fn new(r: R, buf: Buf) -> Self {
+        let read_exact = ReadExactState::new();
+        Self { buf, read_exact, r }
     }
-    pub fn tag(&self) -> Option<&[u8; BLOCK_BYTES]> {
-        if !self.completed_tag {
+    pub fn data(&self) -> Option<&[u8]> {
+        let completed = self.buf.as_ref().len() == self.read_exact.buf_pos;
+        if !completed {
             return None;
         }
-        Some(&self.tag)
+        Some(self.buf.as_ref())
     }
 }
-impl<R> Future for TagReader<R>
+impl<R, Buf> Future for ExactReader<R, Buf>
 where
     R: AsyncRead + Unpin,
+    Buf: AsMut<[u8]> + Unpin,
 {
     type Output = io::Result<()>;
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.deref_mut();
-        ready!(this.read_exact_tag.poll(&mut this.r, &mut *this.tag, cx))?;
-        self.completed_tag = true;
+        ready!(this.read_exact.poll(&mut this.r, this.buf.as_mut(), cx))?;
         Ok(()).into()
     }
 }
@@ -160,8 +164,9 @@ impl<R> NonceCiphertextReader<R> {
             r,
         }
     }
-    pub fn finalize(&self) -> Option<[u8; BLOCK_BYTES]> {
-        Some(self.chacha20.as_ref()?.hasher.as_ref()?.finalize())
+    pub fn into_inner(self) -> (R, Option<Poly1305Hasher>) {
+        let hasher = self.chacha20.and_then(|x| x.into_hasher());
+        (self.r, hasher)
     }
 }
 impl<R: AsyncRead + Unpin> AsyncRead for NonceCiphertextReader<R> {
@@ -182,7 +187,7 @@ impl<R: AsyncRead + Unpin> AsyncRead for NonceCiphertextReader<R> {
                 let config = ChaCha20ReadStateConfig {
                     key: &this.key,
                     nonce: &this.nonce_buf,
-                    hasher: this.hasher,
+                    hash: this.hasher,
                 };
                 this.chacha20.get_or_insert(ChaCha20ReadState::new(&config))
             }

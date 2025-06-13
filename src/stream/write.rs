@@ -1,4 +1,5 @@
 use std::{
+    future::Future,
     io,
     ops::DerefMut,
     pin::Pin,
@@ -28,6 +29,10 @@ impl<W> ChaCha20Writer<W> {
         let chacha20 = ChaCha20WriteState::new(config.state);
         Self { chacha20, w }
     }
+    pub fn into_inner(self) -> (W, Option<Poly1305Hasher>) {
+        let hasher = self.chacha20.into_hasher();
+        (self.w, hasher)
+    }
 }
 impl<W> AsyncWrite for ChaCha20Writer<W>
 where
@@ -42,13 +47,10 @@ where
         let mut w = Pin::new(&mut this.w);
         this.chacha20.poll(&mut w, buf, cx)
     }
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         Pin::new(&mut self.w).poll_flush(cx)
     }
-    fn poll_shutdown(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), io::Error>> {
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         Pin::new(&mut self.w).poll_shutdown(cx)
     }
 }
@@ -86,8 +88,8 @@ impl ChaCha20WriteState {
             hasher,
         }
     }
-    pub fn hasher(&self) -> Option<&Poly1305Hasher> {
-        self.hasher.as_ref()
+    pub fn into_hasher(self) -> Option<Poly1305Hasher> {
+        self.hasher
     }
     pub fn poll<W>(
         &mut self,
@@ -124,26 +126,53 @@ impl ChaCha20WriteState {
     }
 }
 
+#[derive(Debug)]
+pub struct AllWriter<Buf, W> {
+    buf: Buf,
+    write_all: WriteAllState,
+    w: W,
+}
+impl<Buf, W> AllWriter<Buf, W> {
+    pub fn new(buf: Buf, w: W) -> Self {
+        let write_all = WriteAllState::new();
+        Self { buf, write_all, w }
+    }
+    pub fn into_inner(self) -> W {
+        self.w
+    }
+}
+impl<Buf, W> Future for AllWriter<Buf, W>
+where
+    Buf: AsRef<[u8]> + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    type Output = io::Result<()>;
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.deref_mut();
+        ready!(this.write_all.poll(&mut this.w, this.buf.as_ref(), cx))?;
+        Ok(()).into()
+    }
+}
+
 #[derive(Debug, Clone)]
-pub struct NonceCiphertextTagWriterConfig<'a> {
+pub struct NonceCiphertextWriterConfig<'a> {
     pub key: &'a [u8; KEY_BYTES],
     pub write_nonce: bool,
-    pub write_tag: bool,
+    pub hash: bool,
 }
 #[derive(Debug)]
-pub struct NonceCiphertextTagWriter<W> {
+pub struct NonceCiphertextWriter<W> {
     nonce: Option<NonceBuf>,
     write_all_nonce: WriteAllState,
     chacha20: ChaCha20WriteState,
-    write_all_tag: WriteAllState,
     w: W,
 }
-impl<W> NonceCiphertextTagWriter<W> {
-    pub fn new(config: &NonceCiphertextTagWriterConfig<'_>, nonce: NonceBuf, w: W) -> Self {
+impl<W> NonceCiphertextWriter<W> {
+    pub fn new(config: &NonceCiphertextWriterConfig<'_>, nonce: NonceBuf, w: W) -> Self {
         let chacha20_config = ChaCha20WriteStateConfig {
             key: config.key,
             nonce: &nonce,
-            hash: config.write_tag,
+            hash: config.hash,
         };
         let chacha20 = ChaCha20WriteState::new(&chacha20_config);
         let nonce = if config.write_nonce {
@@ -155,12 +184,14 @@ impl<W> NonceCiphertextTagWriter<W> {
             nonce,
             write_all_nonce: WriteAllState::new(),
             chacha20,
-            write_all_tag: WriteAllState::new(),
             w,
         }
     }
+    pub fn into_inner(self) -> (W, Option<Poly1305Hasher>) {
+        (self.w, self.chacha20.into_hasher())
+    }
 }
-impl<W: AsyncWrite + Unpin> AsyncWrite for NonceCiphertextTagWriter<W> {
+impl<W: AsyncWrite + Unpin> AsyncWrite for NonceCiphertextWriter<W> {
     fn poll_write(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -182,11 +213,6 @@ impl<W: AsyncWrite + Unpin> AsyncWrite for NonceCiphertextTagWriter<W> {
         Pin::new(&mut self.w).poll_flush(cx)
     }
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        let this = self.deref_mut();
-        if let Some(hasher) = this.chacha20.hasher() {
-            let tag = hasher.finalize();
-            ready!(this.write_all_tag.poll(&mut this.w, &tag, cx))?;
-        }
         Pin::new(&mut self.w).poll_shutdown(cx)
     }
 }

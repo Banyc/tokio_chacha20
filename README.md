@@ -73,9 +73,9 @@ fn nonce_ciphertext_reader<R>(key: &[u8; KEY_BYTES], r: R) -> NonceCiphertextRea
     NonceCiphertextReader::new(&reader_config, Box::new(*key), nonce_buf, r)
 }
 fn nonce_ciphertext_writer<W>(key: &[u8; KEY_BYTES], w: W) -> NonceCiphertextTagWriter<W> {
-    let writer_config = NonceCiphertextTagWriterConfig {
+    let writer_config = NonceCiphertextWriterConfig {
         write_nonce: true,
-        write_tag: false,
+        hash: false,
         key,
     };
     let nonce = NonceBuf::Nonce(Box::new(rand::random()));

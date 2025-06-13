@@ -6,16 +6,16 @@ use std::{
 
 mod read;
 pub use read::{
-    ChaCha20ReadStateConfig, ChaCha20Reader, ChaCha20ReaderConfig, NonceCiphertextReader,
-    NonceCiphertextReaderConfig, TagReader,
+    ChaCha20ReadStateConfig, ChaCha20Reader, ChaCha20ReaderConfig, ExactReader,
+    NonceCiphertextReader, NonceCiphertextReaderConfig,
 };
 mod duplex;
 pub use duplex::DuplexStream;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 mod write;
 pub use write::{
-    ChaCha20WriteStateConfig, ChaCha20Writer, ChaCha20WriterConfig, NonceCiphertextTagWriter,
-    NonceCiphertextTagWriterConfig,
+    AllWriter, ChaCha20WriteStateConfig, ChaCha20Writer, ChaCha20WriterConfig,
+    NonceCiphertextWriter, NonceCiphertextWriterConfig,
 };
 
 use crate::{mac::Poly1305Hasher, KEY_BYTES, NONCE_BYTES, X_NONCE_BYTES};
@@ -93,7 +93,7 @@ mod tests {
 
     use crate::{
         config::tests::create_random_config,
-        stream::{read::NonceCiphertextReaderConfig, write::NonceCiphertextTagWriterConfig},
+        stream::{read::NonceCiphertextReaderConfig, write::NonceCiphertextWriterConfig},
     };
 
     use super::*;
@@ -171,7 +171,7 @@ mod tests {
         key: &[u8; KEY_BYTES],
         r: R,
         w: W,
-    ) -> (NonceCiphertextReader<R>, NonceCiphertextTagWriter<W>) {
+    ) -> (NonceCiphertextReader<R>, NonceCiphertextWriter<W>) {
         let r = nonce_ciphertext_reader(key, r);
         let w = nonce_ciphertext_writer(key, w);
         (r, w)
@@ -181,13 +181,13 @@ mod tests {
         let nonce_buf = NonceBuf::Nonce(Box::new([0; NONCE_BYTES]));
         NonceCiphertextReader::new(&reader_config, Box::new(*key), nonce_buf, r)
     }
-    fn nonce_ciphertext_writer<W>(key: &[u8; KEY_BYTES], w: W) -> NonceCiphertextTagWriter<W> {
-        let writer_config = NonceCiphertextTagWriterConfig {
+    fn nonce_ciphertext_writer<W>(key: &[u8; KEY_BYTES], w: W) -> NonceCiphertextWriter<W> {
+        let writer_config = NonceCiphertextWriterConfig {
             write_nonce: true,
-            write_tag: false,
+            hash: false,
             key,
         };
         let nonce = NonceBuf::Nonce(Box::new(rand::random()));
-        NonceCiphertextTagWriter::new(&writer_config, nonce, w)
+        NonceCiphertextWriter::new(&writer_config, nonce, w)
     }
 }
